@@ -51,9 +51,86 @@ function chordMidiNotes(rootMidi, degree) {
   return [0, 2, 4].map((o) => extendedDegreeMidi(rootMidi, degree + o));
 }
 
+/* 聲部導向：在合理音域內找「離上一個和弦最近」的轉位，
+   讓 C → G 聽起來是往下走，而不是整個跳上去 */
+function voiceLedNotes(rootMidi, degree, prevNotes) {
+  const offsets = chordMidiNotes(rootMidi, degree).map((n) => n - rootMidi);
+  const low = rootMidi - 6;
+  const high = rootMidi + 14;
+  const candidates = [];
+  for (let inv = 0; inv < offsets.length; inv += 1) {
+    const rotated = [...offsets.slice(inv), ...offsets.slice(0, inv).map((o) => o + 12)];
+    for (let oct = -12; oct <= 12; oct += 12) {
+      const notes = rotated.map((o) => rootMidi + o + oct).sort((a, b) => a - b);
+      if (notes[0] < low || notes[notes.length - 1] > high) continue;
+      if (!candidates.some((c) => c.join() === notes.join())) candidates.push(notes);
+    }
+  }
+  if (!candidates.length) return chordMidiNotes(rootMidi, degree);
+  if (!prevNotes || !prevNotes.length) {
+    // 第一個和弦：選最靠近 C4 附近音域的排列
+    return candidates.reduce((best, notes) => {
+      const cost = notes.reduce((s, n) => s + Math.abs(n - rootMidi), 0);
+      const bestCost = best.reduce((s, n) => s + Math.abs(n - rootMidi), 0);
+      return cost < bestCost ? notes : best;
+    });
+  }
+  let best = null;
+  let bestCost = Infinity;
+  candidates.forEach((notes) => {
+    let cost = 0;
+    notes.forEach((n) => {
+      cost += Math.min(...prevNotes.map((p) => Math.abs(p - n)));
+    });
+    if (cost < bestCost) {
+      bestCost = cost;
+      best = notes;
+    }
+  });
+  return best || chordMidiNotes(rootMidi, degree);
+}
+
+/* 低音線：把根音放在 C2–G3 之間，選離上一個低音最近的八度（平手往下），
+   產生譜例那種「下行低音」的感覺 */
+function bassNoteFor(rootMidi, degree, prevBass) {
+  const base = degree >= 7 ? degree - 7 : degree;
+  const pc = MAJOR_SCALE_OFFSETS[((base % 7) + 7) % 7];
+  const candidates = [];
+  for (let n = 36; n <= 55; n += 12) {
+    const note = n + pc;
+    if (note <= 55) candidates.push(note);
+  }
+  if (prevBass == null) return Math.max(...candidates.filter((c) => c <= rootMidi - 12).concat(candidates[0]));
+  let best = candidates[0];
+  let bestDist = Infinity;
+  candidates.forEach((c) => {
+    const d = Math.abs(c - prevBass);
+    if (d < bestDist || (d === bestDist && c < best)) {
+      bestDist = d;
+      best = c;
+    }
+  });
+  return best;
+}
+
 const STEPS_PER_CHORD = 4;
 const CHORD_DUR = 0.9;
 const STEP_DUR = CHORD_DUR / STEPS_PER_CHORD;
+
+/* 完整彈奏音：低音 + 聲部導向後的和弦（供播放與 MIDI 匯出共用） */
+function fullChordNotes(rootMidi, progression) {
+  const out = [];
+  let prevBass = null;
+  let prevChord = null;
+  progression.forEach((deg) => {
+    const bass = bassNoteFor(rootMidi, deg, prevBass);
+    const upper = voiceLedNotes(rootMidi, deg, prevChord);
+    out.push([bass, ...upper]);
+    prevBass = bass;
+    prevChord = upper;
+  });
+  return out;
+}
 
 /* ---------------------------------------------------------------- */
 /* MIDI 檔案匯出（可匯入 GarageBand for iPad）                          */
@@ -104,8 +181,8 @@ function buildTrackChunk(notesList, channel, extraEventsAtStart = []) {
 
 function buildMidiFile(rootMidi, progression, melody, bpm = 100) {
   const chordNotes = [];
-  progression.forEach((deg, i) => {
-    chordMidiNotes(rootMidi, deg).forEach((note) => {
+  fullChordNotes(rootMidi, progression).forEach((notes, i) => {
+    notes.forEach((note) => {
       chordNotes.push({ start: i * TICKS_PER_BEAT, dur: TICKS_PER_BEAT * 0.95, note });
     });
   });
@@ -435,6 +512,8 @@ export default function App() {
 
   const polyRef = useRef(null);
   const synthRef = useRef(null);
+  const pianoRef = useRef(null);
+  const pianoReadyRef = useRef(false);
   const loadedRef = useRef(false);
 
   const rootMidi = 60; // 固定 C 大調
@@ -449,7 +528,7 @@ export default function App() {
     return unsub;
   }, []);
 
-  // 建立合成器
+  // 建立合成器（鋼琴取樣優先，失敗時退回合成音）
   useEffect(() => {
     polyRef.current = new Tone.PolySynth(Tone.Synth, {
       oscillator: { type: 'triangle' },
@@ -463,10 +542,38 @@ export default function App() {
     }).toDestination();
     synthRef.current.volume.value = -4;
 
+    try {
+      pianoRef.current = new Tone.Sampler({
+        urls: {
+          A0: 'A0.mp3', C1: 'C1.mp3', 'D#1': 'Ds1.mp3', 'F#1': 'Fs1.mp3', A1: 'A1.mp3',
+          C2: 'C2.mp3', 'D#2': 'Ds2.mp3', 'F#2': 'Fs2.mp3', A2: 'A2.mp3',
+          C3: 'C3.mp3', 'D#3': 'Ds3.mp3', 'F#3': 'Fs3.mp3', A3: 'A3.mp3',
+          C4: 'C4.mp3', 'D#4': 'Ds4.mp3', 'F#4': 'Fs4.mp3', A4: 'A4.mp3',
+          C5: 'C5.mp3', 'D#5': 'Ds5.mp3', 'F#5': 'Fs5.mp3', A5: 'A5.mp3',
+          C6: 'C6.mp3', 'D#6': 'Ds6.mp3', 'F#6': 'Fs6.mp3', A6: 'A6.mp3',
+          C7: 'C7.mp3',
+        },
+        baseUrl: 'https://tonejs.github.io/audio/salamander/',
+        onload: () => { pianoReadyRef.current = true; },
+        onerror: () => { pianoReadyRef.current = false; },
+      }).toDestination();
+      pianoRef.current.volume.value = -2;
+    } catch (e) {
+      pianoReadyRef.current = false;
+    }
+
     return () => {
       polyRef.current && polyRef.current.dispose();
       synthRef.current && synthRef.current.dispose();
+      pianoRef.current && pianoRef.current.dispose();
     };
+  }, []);
+
+  // 統一播放：優先鋼琴音色
+  const playNotes = useCallback((notes, dur, time) => {
+    const inst = pianoReadyRef.current && pianoRef.current ? pianoRef.current : polyRef.current;
+    if (time != null) inst.triggerAttackRelease(notes, dur, time);
+    else inst.triggerAttackRelease(notes, dur);
   }, []);
 
   // 讀取這個帳號先前存的進度
@@ -523,8 +630,8 @@ export default function App() {
 
   function playChord(degree) {
     ensureAudio().then(() => {
-      const notes = chordMidiNotes(rootMidi, degree).map(midiToNote);
-      polyRef.current.triggerAttackRelease(notes, 1.1);
+      const notes = fullChordNotes(rootMidi, [degree])[0].map(midiToNote);
+      playNotes(notes, 1.4);
     });
   }
 
@@ -564,14 +671,16 @@ export default function App() {
     ensureAudio().then(() => {
       setIsPlaying(true);
       const now = Tone.now() + 0.05;
-      progression.forEach((deg, i) => {
-        const notes = chordMidiNotes(rootMidi, deg).map(midiToNote);
-        polyRef.current.triggerAttackRelease(notes, CHORD_DUR * 0.92, now + i * CHORD_DUR);
+      const voiced = fullChordNotes(rootMidi, progression);
+      voiced.forEach((notes, i) => {
+        playNotes(notes.map(midiToNote), CHORD_DUR * 1.6, now + i * CHORD_DUR);
       });
       melody.forEach((deg, col) => {
         if (deg == null) return;
         const t = now + col * STEP_DUR;
-        synthRef.current.triggerAttackRelease(midiToNote(extendedDegreeMidi(rootMidi, deg)), STEP_DUR * 0.85, t);
+        const note = midiToNote(extendedDegreeMidi(rootMidi, deg));
+        if (pianoReadyRef.current && pianoRef.current) pianoRef.current.triggerAttackRelease(note, STEP_DUR * 1.6, t);
+        else synthRef.current.triggerAttackRelease(note, STEP_DUR * 0.85, t);
       });
       const totalCols = progression.length * STEPS_PER_CHORD;
       for (let col = 0; col < totalCols; col++) {
@@ -1661,7 +1770,7 @@ function ChordsPage({
             rel="noreferrer"
             className="inline-flex items-center gap-2 text-sm border border-[#333B52] rounded-md px-3 py-2 text-[#A9AFC3] hover:text-[#F2EFE9] hover:border-[#E8A33D] transition-colors"
           >
-            <ExternalLink size={14} /> 影片：15634125 怎麼用
+            <ExternalLink size={14} /> 影片：樂理篇 07（華語經典歌曲的進行）
           </a>
           <a
             href="https://www.youtube.com/watch?v=SvPvmvrGp20&t=111s"
@@ -1669,7 +1778,7 @@ function ChordsPage({
             rel="noreferrer"
             className="inline-flex items-center gap-2 text-sm border border-[#333B52] rounded-md px-3 py-2 text-[#A9AFC3] hover:text-[#F2EFE9] hover:border-[#E8A33D] transition-colors"
           >
-            <ExternalLink size={14} /> 影片：4536251 的秘密
+            <ExternalLink size={14} /> 影片：樂理篇 08（不是 4536，是哪組進行？）
           </a>
         </div>
       </Panel>
