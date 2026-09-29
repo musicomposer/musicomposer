@@ -233,7 +233,7 @@ const TEACHING_IMAGES = [
 ];
 
 const PRESETS = [
-  { name: '15634125', roman: 'C G Am Em F C Dm G', degrees: [0, 4, 5, 2, 3, 0, 1, 4] },
+  { name: '15634125', roman: 'C G Am Em F C Dm G', degrees: [0, 4, 5, 2, 3, 0, 1, 4], link: 'https://drive.google.com/file/d/1x9M1Pl-C5mmA9UwIbTKwj_xVS7i7gcO-/view' },
   { name: '4536251', roman: 'F G Em Am Dm G C', degrees: [3, 4, 2, 5, 1, 4, 0] },
   { name: '抒情流行', roman: 'C G Am F', degrees: [0, 4, 5, 3] },
   { name: '情緒堆疊', roman: 'Am F C G', degrees: [5, 3, 0, 4] },
@@ -1749,28 +1749,41 @@ function ChordsPage({
         {/* 數字進行：兩個併排一行 */}
         <div className="grid grid-cols-2 gap-2 mb-2">
           {PRESETS.filter((p) => /^[\d]+$/.test(p.name) && p.roman.split(' ').length === p.name.length).map((p) => (
-            <button
-              key={p.name}
-              onClick={() => loadPreset(p)}
-              className="text-xs sm:text-sm border border-[#333B52] rounded-md px-2 py-2 hover:border-[#E8A33D] transition-colors overflow-x-auto"
-            >
-              <span className="flex gap-1 justify-center items-end whitespace-nowrap">
-                {p.name.split('').map((n, i) => (
-                  <React.Fragment key={i}>
-                    {i > 0 && (
-                      <span className="flex flex-col items-center leading-tight text-[#5B6178] select-none">
-                        <span className="text-[#F2EFE9]">-</span>
-                        <span className="text-xs mt-0.5">-</span>
+            <div key={p.name} className="relative">
+              <button
+                onClick={() => loadPreset(p)}
+                className="w-full text-xs sm:text-sm border border-[#333B52] rounded-md px-2 py-2 hover:border-[#E8A33D] transition-colors overflow-x-auto"
+              >
+                <span className="flex gap-1 justify-center items-end whitespace-nowrap">
+                  {p.name.split('').map((n, i) => (
+                    <React.Fragment key={i}>
+                      {i > 0 && (
+                        <span className="flex flex-col items-center leading-tight text-[#5B6178] select-none">
+                          <span className="text-[#F2EFE9]">-</span>
+                          <span className="text-xs mt-0.5">-</span>
+                        </span>
+                      )}
+                      <span className="flex flex-col items-center leading-tight">
+                        <span className="text-[#F2EFE9]">{n}</span>
+                        <span className="text-xs text-[#A9AFC3] mt-0.5">{p.roman.split(' ')[i]}</span>
                       </span>
-                    )}
-                    <span className="flex flex-col items-center leading-tight">
-                      <span className="text-[#F2EFE9]">{n}</span>
-                      <span className="text-xs text-[#A9AFC3] mt-0.5">{p.roman.split(' ')[i]}</span>
-                    </span>
-                  </React.Fragment>
-                ))}
-              </span>
-            </button>
+                    </React.Fragment>
+                  ))}
+                </span>
+              </button>
+              {p.link && (
+                <a
+                  href={p.link}
+                  target="_blank"
+                  rel="noreferrer"
+                  title="參考資料（在新分頁開啟）"
+                  onClick={(e) => e.stopPropagation()}
+                  className="absolute top-1.5 right-1.5 w-6 h-6 rounded flex items-center justify-center text-[#A9AFC3] hover:text-[#E8A33D] hover:bg-[#1F2430]"
+                >
+                  <ExternalLink size={13} />
+                </a>
+              )}
+            </div>
           ))}
         </div>
 
