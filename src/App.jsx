@@ -12,7 +12,24 @@ import { doc, getDoc, setDoc, collection, getDocs } from 'firebase/firestore';
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 const MAJOR_SCALE_OFFSETS = [0, 2, 4, 5, 7, 9, 11];
 const ROMAN = ['I', 'ii', 'iii', 'IV', 'V', 'vi', 'vii°'];
-const QUALITY_LABEL = ['大三和弦', '小三和弦', '小三和弦', '大三和弦', '大三和弦', '小三和弦', '減三和弦'];
+
+/* C 大調常用和弦：degree 0–6 為三和弦，7–13 為七和弦（degree + 7） */
+const TRIAD_NAMES = ['C', 'Dm', 'Em', 'F', 'G', 'Am', 'Bdim'];
+const SEVENTH_NAMES = ['Cmaj7', 'Dm7', 'Em7', 'Fmaj7', 'G7', 'Am7', 'Bm7♭5'];
+const TRIAD_QUALITY = ['大三和弦', '小三和弦', '小三和弦', '大三和弦', '大三和弦', '小三和弦', '減三和弦'];
+const SEVENTH_QUALITY = ['大七和弦', '小七和弦', '小七和弦', '大七和弦', '屬七和弦', '小七和弦', '半減七和弦'];
+
+function isSeventh(degree) {
+  return degree >= 7;
+}
+
+function chordSymbol(degree) {
+  return isSeventh(degree) ? SEVENTH_NAMES[degree - 7] : TRIAD_NAMES[degree];
+}
+
+function chordQuality(degree) {
+  return isSeventh(degree) ? SEVENTH_QUALITY[degree - 7] : TRIAD_QUALITY[degree];
+}
 
 function midiToNote(midi) {
   const name = NOTE_NAMES[((midi % 12) + 12) % 12];
@@ -27,6 +44,10 @@ function extendedDegreeMidi(rootMidi, extDeg) {
 }
 
 function chordMidiNotes(rootMidi, degree) {
+  if (degree >= 7) {
+    const base = degree - 7;
+    return [0, 2, 4, 6].map((o) => extendedDegreeMidi(rootMidi, base + o));
+  }
   return [0, 2, 4].map((o) => extendedDegreeMidi(rootMidi, degree + o));
 }
 
@@ -118,10 +139,12 @@ function downloadMidi(rootMidi, progression, melody) {
 }
 
 const PRESETS = [
-  { name: '抒情流行', roman: 'I – V – vi – IV', degrees: [0, 4, 5, 3] },
-  { name: '情緒堆疊', roman: 'vi – IV – I – V', degrees: [5, 3, 0, 4] },
-  { name: '經典流行', roman: 'I – vi – IV – V', degrees: [0, 5, 3, 4] },
-  { name: '爵士感', roman: 'ii – V – I', degrees: [1, 4, 0] },
+  { name: '15634123', roman: 'C G Am Em F C Dm Em', degrees: [0, 4, 5, 2, 3, 0, 1, 2] },
+  { name: '4536251', roman: 'F G Em Am Dm G C', degrees: [3, 4, 2, 5, 1, 4, 0] },
+  { name: '抒情流行', roman: 'C G Am F', degrees: [0, 4, 5, 3] },
+  { name: '情緒堆疊', roman: 'Am F C G', degrees: [5, 3, 0, 4] },
+  { name: '經典流行', roman: 'C Am F G', degrees: [0, 5, 3, 4] },
+  { name: '爵士感', roman: 'Dm G C', degrees: [1, 4, 0] },
 ];
 
 /* ---------------------------------------------------------------- */
@@ -377,7 +400,6 @@ export default function App() {
   const [teacherMode, setTeacherMode] = useState(window.location.hash === '#teacher');
 
   const [page, setPage] = useState('overview');
-  const [rootIndex, setRootIndex] = useState(0); // C
   const [progression, setProgression] = useState(PRESETS[0].degrees);
   const [melody, setMelody] = useState(Array(PRESETS[0].degrees.length * STEPS_PER_CHORD).fill(null));
   const [completed, setCompleted] = useState({});
@@ -410,7 +432,7 @@ export default function App() {
   const synthRef = useRef(null);
   const loadedRef = useRef(false);
 
-  const rootMidi = 60 + rootIndex;
+  const rootMidi = 60; // 固定 C 大調
 
   // 監聽登入狀態
   useEffect(() => {
@@ -450,7 +472,6 @@ export default function App() {
         const snap = await getDoc(doc(db, 'progress', user.uid));
         if (snap.exists()) {
           const data = snap.data();
-          if (typeof data.rootIndex === 'number') setRootIndex(data.rootIndex);
           if (Array.isArray(data.progression) && data.progression.length) setProgression(data.progression);
           if (Array.isArray(data.melody)) setMelody(data.melody);
           if (data.completed) setCompleted(data.completed);
@@ -479,7 +500,7 @@ export default function App() {
     async (patch) => {
       if (!loadedRef.current || !user) return;
       try {
-        const payload = { rootIndex, progression, melody, completed, lyricAnalysis, subjectLyrics, ...patch };
+        const payload = { progression, melody, completed, lyricAnalysis, subjectLyrics, ...patch };
         await setDoc(doc(db, 'progress', user.uid), payload, { merge: true });
         setSavedMsg('已儲存');
         setTimeout(() => setSavedMsg(''), 1800);
@@ -488,7 +509,7 @@ export default function App() {
         setTimeout(() => setSavedMsg(''), 2200);
       }
     },
-    [user, rootIndex, progression, melody, completed, lyricAnalysis, subjectLyrics]
+    [user, progression, melody, completed, lyricAnalysis, subjectLyrics]
   );
 
   async function ensureAudio() {
@@ -647,8 +668,6 @@ export default function App() {
 
         {page === 'chords' && (
           <ChordsPage
-            rootIndex={rootIndex}
-            setRootIndex={(i) => setRootIndex(i)}
             progression={progression}
             playChord={playChord}
             addToProgression={addToProgression}
@@ -1027,7 +1046,6 @@ function LyricAnalysisPage({ done, toggleDone, lyricAnalysis, setLyricAnalysis, 
 
       {/* 學生資訊 */}
       <Panel className="mb-6">
-        <p className="text-xs text-[#A9AFC3] mb-3">請先填寫你的資訊，方便老師辨識</p>
         <div className="grid gap-3 sm:grid-cols-4">
           <div>
             <label className="text-xs text-[#A9AFC3] block mb-1">班級</label>
@@ -1475,7 +1493,7 @@ function GeneralLyricsContent({ rhymeOn, setRhymeOn }) {
 /* ---------------------------------------------------------------- */
 
 function ChordsPage({
-  rootIndex, setRootIndex, progression, playChord, addToProgression,
+  progression, playChord, addToProgression,
   removeFromProgression, loadPreset, playAll, isPlaying, done, toggleDone, onSave, savedMsg,
 }) {
   return (
@@ -1486,52 +1504,88 @@ function ChordsPage({
           <Check size={13} className={done ? 'text-[#8FBF9F]' : ''} /> {done ? '已完成' : '標記完成'}
         </button>
       </div>
-      <p className="text-[#A9AFC3] max-w-[62ch] leading-relaxed -mt-4 mb-8">
-        每個大調音階裡有七個自然和弦，點一下可以聽聽它們各自的情緒，再把喜歡的和弦加進下面的進行裡。
+      <p className="text-[#A9AFC3] max-w-[62ch] leading-relaxed -mt-4 mb-6">
+        下面都是 C 大調常用的和弦，點一下可以聽聽它們各自的情緒，再把喜歡的和弦加進下面的進行裡。
       </p>
 
-      <Panel className="mb-6">
-        <p className="text-sm text-[#A9AFC3] mb-2">調性</p>
-        <div className="flex flex-wrap gap-1.5">
-          {NOTE_NAMES.map((n, i) => (
-            <button
-              key={n}
-              onClick={() => setRootIndex(i)}
-              className={`w-10 h-9 rounded text-sm border transition-colors ${
-                rootIndex === i ? 'border-[#E8A33D] bg-[#E8A33D1A] text-[#F2EFE9]' : 'border-[#333B52] text-[#A9AFC3] hover:text-[#F2EFE9]'
-              }`}
-            >
-              {n}
-            </button>
-          ))}
-        </div>
-      </Panel>
+      {/* 教學圖示 */}
+      <div className="grid gap-4 sm:grid-cols-2 mb-6">
+        <img
+          src="images/chord-what.png"
+          alt="什麼是和弦：音符疊在一起就是和弦"
+          className="w-full rounded-lg border border-[#333B52] bg-white object-contain"
+          onError={(e) => { e.currentTarget.style.display = 'none'; }}
+        />
+        <img
+          src="images/chord-progressions.png"
+          alt="常用和弦進行 15634123 與 4536251"
+          className="w-full rounded-lg border border-[#333B52] bg-white object-contain"
+          onError={(e) => { e.currentTarget.style.display = 'none'; }}
+        />
+      </div>
 
       <Panel className="mb-6">
-        <p className="text-sm text-[#A9AFC3] mb-3">音階上的七個和弦（點一下試聽並加入進行）</p>
+        <p className="text-sm text-[#A9AFC3] mb-3">C 大調的常用和弦（點一下試聽並加入進行）</p>
         <div className="grid grid-cols-4 sm:grid-cols-7 gap-2">
-          {ROMAN.map((r, d) => (
-            <button
-              key={r}
-              onClick={() => {
-                playChord(d);
-                addToProgression(d);
-              }}
-              disabled={progression.length >= 8}
-              className="flex flex-col items-center gap-1 border border-[#333B52] rounded-md py-3 hover:border-[#E8A33D] transition-colors disabled:opacity-40"
-            >
-              <span className="font-serif text-lg text-[#E8A33D]">{r}</span>
-              <span className="text-[11px] text-[#A9AFC3] text-center leading-tight">{QUALITY_LABEL[d]}</span>
-            </button>
-          ))}
+          {TRIAD_NAMES.map((sym, d) => {
+            const isDim = d === 6;
+            const isMajor = TRIAD_QUALITY[d] === '大三和弦';
+            return (
+              <button
+                key={sym}
+                onClick={() => {
+                  playChord(d);
+                  addToProgression(d);
+                }}
+                disabled={progression.length >= 8}
+                className={`flex flex-col items-center gap-1 border rounded-md py-3 transition-colors disabled:opacity-40 ${
+                  isDim
+                    ? 'border-[#333B52] opacity-50 hover:opacity-100 hover:border-[#A9AFC3]'
+                    : isMajor
+                      ? 'border-[#333B52] hover:border-[#E8A33D]'
+                      : 'border-[#333B52] hover:border-[#6FA8DC]'
+                }`}
+              >
+                <span className={`font-serif text-lg ${isDim ? 'text-[#A9AFC3]' : isMajor ? 'text-[#E8A33D]' : 'text-[#6FA8DC]'}`}>
+                  {sym}
+                </span>
+                <span className="text-[11px] text-[#A9AFC3] text-center leading-tight">{TRIAD_QUALITY[d]}</span>
+                {isDim && <span className="text-[10px] text-[#6B7285]">較少用</span>}
+              </button>
+            );
+          })}
+        </div>
+
+        <p className="text-sm text-[#A9AFC3] mb-3 mt-6">七和弦（加一個音，色彩更豐富）</p>
+        <div className="grid grid-cols-4 sm:grid-cols-7 gap-2">
+          {SEVENTH_NAMES.map((sym, i) => {
+            const d = i + 7;
+            const isMajor = SEVENTH_QUALITY[i] === '大七和弦' || SEVENTH_QUALITY[i] === '屬七和弦';
+            return (
+              <button
+                key={sym}
+                onClick={() => {
+                  playChord(d);
+                  addToProgression(d);
+                }}
+                disabled={progression.length >= 8}
+                className={`flex flex-col items-center gap-1 border border-[#333B52] rounded-md py-3 transition-colors disabled:opacity-40 ${
+                  isMajor ? 'hover:border-[#E8A33D]' : 'hover:border-[#6FA8DC]'
+                }`}
+              >
+                <span className={`font-serif text-base ${isMajor ? 'text-[#E8A33D]' : 'text-[#6FA8DC]'}`}>{sym}</span>
+                <span className="text-[11px] text-[#A9AFC3] text-center leading-tight">{SEVENTH_QUALITY[i]}</span>
+              </button>
+            );
+          })}
         </div>
       </Panel>
 
       <Panel className="mb-6">
         <div className="flex items-center justify-between mb-3">
-          <p className="text-sm text-[#A9AFC3]">常用進行範本</p>
+          <p className="text-sm text-[#A9AFC3]">教學進行（點一下直接套用）</p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
           {PRESETS.map((p) => (
             <button
               key={p.name}
@@ -1542,6 +1596,30 @@ function ChordsPage({
               <span className="block text-xs text-[#A9AFC3]">{p.roman}</span>
             </button>
           ))}
+        </div>
+
+        <p className="text-sm text-[#A9AFC3] mb-2">兩組必學的進行</p>
+        <ul className="text-sm text-[#A9AFC3] space-y-1 mb-3">
+          <li><span className="text-[#E8A33D] font-medium">15634123</span>：C → G → Am → Em → F → C → Dm → Em，很多流行歌的骨架。</li>
+          <li><span className="text-[#E8A33D] font-medium">4536251</span>：F → G → Em → Am → Dm → G → C，華語歌最常見的走向。</li>
+        </ul>
+        <div className="flex flex-wrap gap-3">
+          <a
+            href="https://www.youtube.com/watch?v=FFTN_UO5twc&t=195s"
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-2 text-sm border border-[#333B52] rounded-md px-3 py-2 text-[#A9AFC3] hover:text-[#F2EFE9] hover:border-[#E8A33D] transition-colors"
+          >
+            <ExternalLink size={14} /> 影片：15634123 怎麼用
+          </a>
+          <a
+            href="https://www.youtube.com/watch?v=SvPvmvrGp20&t=111s"
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-2 text-sm border border-[#333B52] rounded-md px-3 py-2 text-[#A9AFC3] hover:text-[#F2EFE9] hover:border-[#E8A33D] transition-colors"
+          >
+            <ExternalLink size={14} /> 影片：4536251 的秘密
+          </a>
         </div>
       </Panel>
 
@@ -1556,7 +1634,7 @@ function ChordsPage({
           <div className="flex flex-wrap gap-2 mb-5">
             {progression.map((d, i) => (
               <span key={i} className="inline-flex items-center gap-2 bg-[#1F2430] border border-[#333B52] rounded-md px-3 py-1.5 text-sm">
-                {ROMAN[d]}
+                {chordSymbol(d)}
                 <button onClick={() => removeFromProgression(i)} className="text-[#A9AFC3] hover:text-[#E1685B]">
                   <X size={13} />
                 </button>
@@ -1619,7 +1697,7 @@ function MelodyPage({
           <div className="flex text-xs text-[#A9AFC3] mb-2 pl-10">
             {progression.map((d, i) => (
               <div key={i} style={{ flex: STEPS_PER_CHORD }} className="text-center">
-                {ROMAN[d]}
+                {chordSymbol(d)}
               </div>
             ))}
           </div>
@@ -1755,7 +1833,7 @@ function TeacherDashboard() {
       const entries = s.lyricAnalysis?.entries || [];
       const custom = s.lyricAnalysis?.custom || {};
       const subj = s.subjectLyrics || {};
-      const progression = (s.progression || []).map((d) => ROMAN[d] || '').join(' → ');
+      const progression = (s.progression || []).map((d) => chordSymbol(d)).join(' → ');
 
       return [
         info.className || '',
@@ -1949,7 +2027,7 @@ function TeacherDashboard() {
                           <div>
                             <p className="text-xs text-[#E8A33D] mb-2">和弦進行</p>
                             <p className="text-sm">
-                              {s.progression.map((d) => ROMAN[d]).join(' → ')}
+                              {s.progression.map((d) => chordSymbol(d)).join(' → ')}
                             </p>
                           </div>
                         )}
