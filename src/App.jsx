@@ -138,6 +138,11 @@ function downloadMidi(rootMidi, progression, melody) {
   setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
+const TEACHING_IMAGES = [
+  { src: 'images/chord-what.png', alt: '什麼是和弦：音符疊在一起就是和弦' },
+  { src: 'images/chord-progressions.png', alt: '常用和弦進行 15634125 與 4536251' },
+];
+
 const PRESETS = [
   { name: '15634125', roman: 'C G Am Em F C Dm G', degrees: [0, 4, 5, 2, 3, 0, 1, 4] },
   { name: '4536251', roman: 'F G Em Am Dm G C', degrees: [3, 4, 2, 5, 1, 4, 0] },
@@ -1496,6 +1501,7 @@ function ChordsPage({
   progression, playChord, addToProgression,
   removeFromProgression, loadPreset, playAll, isPlaying, done, toggleDone, onSave, savedMsg,
 }) {
+  const [zoomImg, setZoomImg] = useState(null);
   return (
     <div>
       <div className="flex items-center justify-between gap-4 mb-1">
@@ -1508,21 +1514,37 @@ function ChordsPage({
         下面都是 C 大調常用的和弦，點一下可以聽聽它們各自的情緒，再把喜歡的和弦加進下面的進行裡。
       </p>
 
-      {/* 教學圖示 */}
+      {/* 教學圖示（點一下放大） */}
       <div className="grid gap-4 sm:grid-cols-2 mb-6">
-        <img
-          src="images/chord-what.png"
-          alt="什麼是和弦：音符疊在一起就是和弦"
-          className="w-full rounded-lg border border-[#333B52] bg-white object-contain"
-          onError={(e) => { e.currentTarget.style.display = 'none'; }}
-        />
-        <img
-          src="images/chord-progressions.png"
-          alt="常用和弦進行 15634125 與 4536251"
-          className="w-full rounded-lg border border-[#333B52] bg-white object-contain"
-          onError={(e) => { e.currentTarget.style.display = 'none'; }}
-        />
+        {TEACHING_IMAGES.map((img) => (
+          <img
+            key={img.src}
+            src={img.src}
+            alt={img.alt}
+            title="點一下放大"
+            onClick={() => setZoomImg(img)}
+            className="w-full rounded-lg border border-[#333B52] bg-white object-contain cursor-zoom-in hover:border-[#E8A33D] transition-colors"
+            onError={(e) => { e.currentTarget.style.display = 'none'; }}
+          />
+        ))}
       </div>
+
+      {zoomImg && (
+        <div
+          className="fixed inset-0 z-50 bg-[#0B0D14]/90 flex items-center justify-center p-4 cursor-zoom-out"
+          onClick={() => setZoomImg(null)}
+        >
+          <img src={zoomImg.src} alt={zoomImg.alt} className="max-w-[96vw] max-h-[92vh] rounded-lg shadow-2xl" />
+          <button
+            onClick={() => setZoomImg(null)}
+            className="absolute top-4 right-4 w-9 h-9 rounded-full bg-[#1F2430] border border-[#333B52] text-[#A9AFC3] hover:text-[#F2EFE9] flex items-center justify-center"
+            aria-label="關閉"
+          >
+            <X size={18} />
+          </button>
+          <span className="absolute bottom-4 left-1/2 -translate-x-1/2 text-xs text-[#A9AFC3]">點任意處關閉</span>
+        </div>
+      )}
 
       <Panel className="mb-6">
         <p className="text-sm text-[#A9AFC3] mb-3">C 大調的常用和弦（點一下試聽並加入進行）</p>
