@@ -139,7 +139,7 @@ function downloadMidi(rootMidi, progression, melody) {
 }
 
 const PRESETS = [
-  { name: '15634123', roman: 'C G Am Em F C Dm Em', degrees: [0, 4, 5, 2, 3, 0, 1, 2] },
+  { name: '15634125', roman: 'C G Am Em F C Dm G', degrees: [0, 4, 5, 2, 3, 0, 1, 4] },
   { name: '4536251', roman: 'F G Em Am Dm G C', degrees: [3, 4, 2, 5, 1, 4, 0] },
   { name: '抒情流行', roman: 'C G Am F', degrees: [0, 4, 5, 3] },
   { name: '情緒堆疊', roman: 'Am F C G', degrees: [5, 3, 0, 4] },
@@ -1518,7 +1518,7 @@ function ChordsPage({
         />
         <img
           src="images/chord-progressions.png"
-          alt="常用和弦進行 15634123 與 4536251"
+          alt="常用和弦進行 15634125 與 4536251"
           className="w-full rounded-lg border border-[#333B52] bg-white object-contain"
           onError={(e) => { e.currentTarget.style.display = 'none'; }}
         />
@@ -1600,7 +1600,7 @@ function ChordsPage({
 
         <p className="text-sm text-[#A9AFC3] mb-2">兩組必學的進行</p>
         <ul className="text-sm text-[#A9AFC3] space-y-1 mb-3">
-          <li><span className="text-[#E8A33D] font-medium">15634123</span>：C → G → Am → Em → F → C → Dm → Em，很多流行歌的骨架。</li>
+          <li><span className="text-[#E8A33D] font-medium">15634125</span>：C → G → Am → Em → F → C → Dm → G，很多流行歌的骨架。</li>
           <li><span className="text-[#E8A33D] font-medium">4536251</span>：F → G → Em → Am → Dm → G → C，華語歌最常見的走向。</li>
         </ul>
         <div className="flex flex-wrap gap-3">
@@ -1610,7 +1610,7 @@ function ChordsPage({
             rel="noreferrer"
             className="inline-flex items-center gap-2 text-sm border border-[#333B52] rounded-md px-3 py-2 text-[#A9AFC3] hover:text-[#F2EFE9] hover:border-[#E8A33D] transition-colors"
           >
-            <ExternalLink size={14} /> 影片：15634123 怎麼用
+            <ExternalLink size={14} /> 影片：15634125 怎麼用
           </a>
           <a
             href="https://www.youtube.com/watch?v=SvPvmvrGp20&t=111s"
