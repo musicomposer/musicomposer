@@ -1607,43 +1607,46 @@ function ChordsPage({
         <div className="flex items-center justify-between mb-3">
           <p className="text-sm text-[#A9AFC3]">教學進行（點一下直接套用）</p>
         </div>
+        {/* 數字進行：每個各佔一整行 */}
+        <div className="grid grid-cols-1 gap-2 mb-2">
+          {PRESETS.filter((p) => /^[\d]+$/.test(p.name) && p.roman.split(' ').length === p.name.length).map((p) => (
+            <button
+              key={p.name}
+              onClick={() => loadPreset(p)}
+              className="text-sm border border-[#333B52] rounded-md px-3 py-2 hover:border-[#E8A33D] transition-colors"
+            >
+              <span className="flex gap-2 justify-center items-end">
+                {p.name.split('').map((n, i) => (
+                  <React.Fragment key={i}>
+                    {i > 0 && (
+                      <span className="flex flex-col items-center leading-tight text-[#5B6178] select-none">
+                        <span className="text-[#F2EFE9]">-</span>
+                        <span className="text-xs mt-0.5">-</span>
+                      </span>
+                    )}
+                    <span className="flex flex-col items-center leading-tight">
+                      <span className="text-[#F2EFE9]">{n}</span>
+                      <span className="text-xs text-[#A9AFC3] mt-0.5">{p.roman.split(' ')[i]}</span>
+                    </span>
+                  </React.Fragment>
+                ))}
+              </span>
+            </button>
+          ))}
+        </div>
+
+        {/* 名稱進行：另起一行 */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
-          {PRESETS.map((p) => {
-            const digits = p.name.split('');
-            const chords = p.roman.split(' ');
-            const isNumbered = /^[\d]+$/.test(p.name) && chords.length === digits.length;
-            return (
-              <button
-                key={p.name}
-                onClick={() => loadPreset(p)}
-                className="text-sm border border-[#333B52] rounded-md px-3 py-2 hover:border-[#E8A33D] transition-colors text-left"
-              >
-                {isNumbered ? (
-                  <span className="flex gap-1.5 justify-center items-end">
-                    {digits.map((n, i) => (
-                      <React.Fragment key={i}>
-                        {i > 0 && (
-                          <span className="flex flex-col items-center leading-tight text-[#5B6178] select-none">
-                            <span className="text-[#F2EFE9]">-</span>
-                            <span className="text-xs mt-0.5">-</span>
-                          </span>
-                        )}
-                        <span className="flex flex-col items-center leading-tight">
-                          <span className="text-[#F2EFE9]">{n}</span>
-                          <span className="text-xs text-[#A9AFC3] mt-0.5">{chords[i]}</span>
-                        </span>
-                      </React.Fragment>
-                    ))}
-                  </span>
-                ) : (
-                  <>
-                    <span className="block text-[#F2EFE9]">{p.name}</span>
-                    <span className="block text-xs text-[#A9AFC3]">{p.roman.split(' ').join(' - ')}</span>
-                  </>
-                )}
-              </button>
-            );
-          })}
+          {PRESETS.filter((p) => !/^[\d]+$/.test(p.name)).map((p) => (
+            <button
+              key={p.name}
+              onClick={() => loadPreset(p)}
+              className="text-sm border border-[#333B52] rounded-md px-3 py-2 hover:border-[#E8A33D] transition-colors text-left"
+            >
+              <span className="block text-[#F2EFE9]">{p.name}</span>
+              <span className="block text-xs text-[#A9AFC3]">{p.roman.split(' ').join(' - ')}</span>
+            </button>
+          ))}
         </div>
 
         <p className="text-sm text-[#A9AFC3] mb-2">兩組必學的進行</p>
