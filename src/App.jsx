@@ -1619,18 +1619,26 @@ function ChordsPage({
                 className="text-sm border border-[#333B52] rounded-md px-3 py-2 hover:border-[#E8A33D] transition-colors text-left"
               >
                 {isNumbered ? (
-                  <span className="flex gap-2 justify-center">
+                  <span className="flex gap-1.5 justify-center items-end">
                     {digits.map((n, i) => (
-                      <span key={i} className="flex flex-col items-center leading-tight">
-                        <span className="text-[#F2EFE9]">{n}</span>
-                        <span className="text-xs text-[#A9AFC3] mt-0.5">{chords[i]}</span>
-                      </span>
+                      <React.Fragment key={i}>
+                        {i > 0 && (
+                          <span className="flex flex-col items-center leading-tight text-[#5B6178] select-none">
+                            <span className="text-[#F2EFE9]">-</span>
+                            <span className="text-xs mt-0.5">-</span>
+                          </span>
+                        )}
+                        <span className="flex flex-col items-center leading-tight">
+                          <span className="text-[#F2EFE9]">{n}</span>
+                          <span className="text-xs text-[#A9AFC3] mt-0.5">{chords[i]}</span>
+                        </span>
+                      </React.Fragment>
                     ))}
                   </span>
                 ) : (
                   <>
                     <span className="block text-[#F2EFE9]">{p.name}</span>
-                    <span className="block text-xs text-[#A9AFC3]">{p.roman}</span>
+                    <span className="block text-xs text-[#A9AFC3]">{p.roman.split(' ').join(' - ')}</span>
                   </>
                 )}
               </button>
