@@ -1586,16 +1586,34 @@ function ChordsPage({
           <p className="text-sm text-[#A9AFC3]">教學進行（點一下直接套用）</p>
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
-          {PRESETS.map((p) => (
-            <button
-              key={p.name}
-              onClick={() => loadPreset(p)}
-              className="text-sm border border-[#333B52] rounded-md px-3 py-2 hover:border-[#E8A33D] transition-colors text-left"
-            >
-              <span className="block text-[#F2EFE9]">{p.name}</span>
-              <span className="block text-xs text-[#A9AFC3]">{p.roman}</span>
-            </button>
-          ))}
+          {PRESETS.map((p) => {
+            const digits = p.name.split('');
+            const chords = p.roman.split(' ');
+            const isNumbered = /^[\d]+$/.test(p.name) && chords.length === digits.length;
+            return (
+              <button
+                key={p.name}
+                onClick={() => loadPreset(p)}
+                className="text-sm border border-[#333B52] rounded-md px-3 py-2 hover:border-[#E8A33D] transition-colors text-left"
+              >
+                {isNumbered ? (
+                  <span className="flex gap-2 justify-center">
+                    {digits.map((n, i) => (
+                      <span key={i} className="flex flex-col items-center leading-tight">
+                        <span className="text-[#F2EFE9]">{n}</span>
+                        <span className="text-xs text-[#A9AFC3] mt-0.5">{chords[i]}</span>
+                      </span>
+                    ))}
+                  </span>
+                ) : (
+                  <>
+                    <span className="block text-[#F2EFE9]">{p.name}</span>
+                    <span className="block text-xs text-[#A9AFC3]">{p.roman}</span>
+                  </>
+                )}
+              </button>
+            );
+          })}
         </div>
 
         <p className="text-sm text-[#A9AFC3] mb-2">兩組必學的進行</p>
