@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import * as Tone from 'tone';
-import { Music, ListMusic, PenLine, Guitar, Waves, Play, Save, Check, X, Download, LogOut, ExternalLink, Headphones } from 'lucide-react';
+import { Music, ListMusic, PenLine, Guitar, Waves, Play, Save, Check, X, Download, LogOut, ExternalLink, Headphones, Copy } from 'lucide-react';
 import { auth, googleProvider, db } from './firebase';
 import { onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth';
 import { doc, getDoc, setDoc, collection, getDocs } from 'firebase/firestore';
@@ -200,6 +200,18 @@ function buildMidiFile(rootMidi, progression, melody, bpm = 100) {
 
   const header = [0x4d, 0x54, 0x68, 0x64, ...u32(6), ...u16(1), ...u16(2), ...u16(TICKS_PER_BEAT)]; // 'MThd'
   return new Uint8Array([...header, ...track1, ...track2]);
+}
+
+function fallbackCopy(text, done) {
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  try { document.execCommand('copy'); } catch (e) { /* 忽略 */ }
+  document.body.removeChild(ta);
+  done();
 }
 
 function downloadMidi(rootMidi, progression, melody) {
@@ -486,6 +498,7 @@ export default function App() {
   const [melody, setMelody] = useState(Array(PRESETS[0].degrees.length * STEPS_PER_CHORD).fill(null));
   const [completed, setCompleted] = useState({});
   const [savedMsg, setSavedMsg] = useState('');
+  const [copiedMsg, setCopiedMsg] = useState('');
   const [isPlaying, setIsPlaying] = useState(false);
   const [playheadCol, setPlayheadCol] = useState(-1);
   const [rhymeOn, setRhymeOn] = useState(false);
@@ -658,6 +671,19 @@ export default function App() {
     setMelody(Array(preset.degrees.length * STEPS_PER_CHORD).fill(null));
   }
 
+  function copyChords() {
+    const text = progression.map((d) => chordSymbol(d)).join(' – ');
+    const done = () => {
+      setCopiedMsg('已複製');
+      setTimeout(() => setCopiedMsg(''), 1800);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(text, done));
+    } else {
+      fallbackCopy(text, done);
+    }
+  }
+
   function toggleMelodyCell(col, extDeg) {
     setMelody((prev) => {
       const next = [...prev];
@@ -793,6 +819,9 @@ export default function App() {
             toggleDone={() => toggleComplete('chords')}
             onSave={() => persist({})}
             savedMsg={savedMsg}
+            onExportMidi={() => downloadMidi(rootMidi, progression, melody)}
+            onCopyChords={copyChords}
+            copiedMsg={copiedMsg}
           />
         )}
 
@@ -1609,6 +1638,7 @@ function GeneralLyricsContent({ rhymeOn, setRhymeOn }) {
 function ChordsPage({
   progression, playChord, addToProgression,
   removeFromProgression, loadPreset, playAll, isPlaying, done, toggleDone, onSave, savedMsg,
+  onExportMidi, onCopyChords, copiedMsg,
 }) {
   const [zoomImg, setZoomImg] = useState(null);
   return (
@@ -1786,7 +1816,10 @@ function ChordsPage({
       <Panel>
         <div className="flex items-center justify-between mb-3">
           <p className="text-sm text-[#A9AFC3]">我的和弦進行（最多 8 個）</p>
-          {savedMsg && <span className="text-xs text-[#8FBF9F]">{savedMsg}</span>}
+          <span className="text-xs">
+            {copiedMsg && <span className="text-[#8FBF9F] mr-3">{copiedMsg}</span>}
+            {savedMsg && <span className="text-[#8FBF9F]">{savedMsg}</span>}
+          </span>
         </div>
         {progression.length === 0 ? (
           <p className="text-sm text-[#A9AFC3] mb-4">還沒有和弦，點上面的和弦按鈕開始建立吧。</p>
@@ -1816,7 +1849,24 @@ function ChordsPage({
           >
             <Save size={15} /> 儲存這組和弦
           </button>
+          <button
+            onClick={onExportMidi}
+            disabled={!progression.length}
+            className="inline-flex items-center gap-2 border border-[#333B52] rounded-md px-4 py-2 text-sm text-[#A9AFC3] hover:text-[#F2EFE9] disabled:opacity-40"
+          >
+            <Download size={15} /> 匯出 MIDI
+          </button>
+          <button
+            onClick={onCopyChords}
+            disabled={!progression.length}
+            className="inline-flex items-center gap-2 border border-[#333B52] rounded-md px-4 py-2 text-sm text-[#A9AFC3] hover:text-[#F2EFE9] disabled:opacity-40"
+          >
+            <Copy size={15} /> 複製和弦譜
+          </button>
         </div>
+        <p className="text-xs text-[#A9AFC3] mt-3 leading-relaxed">
+          匯出的 .mid 檔可以拖進 GarageBand 繼續製作；「複製和弦譜」會把 C – G – Am 這串文字複製起來，方便貼到作業或通訊軟體。
+        </p>
       </Panel>
     </div>
   );
