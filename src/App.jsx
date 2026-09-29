@@ -1804,8 +1804,8 @@ function ChordsPage({
 
         <p className="text-sm text-[#A9AFC3] mb-2">兩組必學的進行</p>
         <ul className="text-sm text-[#A9AFC3] space-y-1 mb-3">
-          <li><span className="text-[#E8A33D] font-medium">15634125</span>：C → G → Am → Em → F → C → Dm → G，很多流行歌的骨架。</li>
-          <li><span className="text-[#E8A33D] font-medium">4536251</span>：F → G → Em → Am → Dm → G → C，華語歌最常見的走向。</li>
+          <li><span className="text-[#E8A33D] font-medium">15634125</span>：C → G → Am → Em → F → C → Dm → G</li>
+          <li><span className="text-[#E8A33D] font-medium">4536251</span>：F → G → Em → Am → Dm → G → C</li>
         </ul>
         <div className="flex flex-wrap gap-3">
           <a
