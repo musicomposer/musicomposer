@@ -114,7 +114,7 @@ function bassNoteFor(rootMidi, degree, prevBass) {
 }
 
 const STEPS_PER_CHORD = 4;
-const CHORD_DUR = 0.9;
+const CHORD_DUR = 2.4; // 每個和弦 4 拍（100bpm 下一小節）
 const STEP_DUR = CHORD_DUR / STEPS_PER_CHORD;
 
 /* 完整彈奏音：低音 + 聲部導向後的和弦（供播放與 MIDI 匯出共用） */
@@ -136,8 +136,9 @@ function fullChordNotes(rootMidi, progression) {
 /* MIDI 檔案匯出（可匯入 GarageBand for iPad）                          */
 /* ---------------------------------------------------------------- */
 
-const TICKS_PER_BEAT = 480; // 每個和弦 = 1 拍
-const TICKS_PER_STEP = TICKS_PER_BEAT / STEPS_PER_CHORD; // 每個旋律格 = 1/4 拍
+const TICKS_PER_BEAT = 480;
+const TICKS_PER_CHORD = TICKS_PER_BEAT * 4; // 每個和弦 = 4 拍
+const TICKS_PER_STEP = TICKS_PER_BEAT; // 每個旋律格 = 1 拍
 
 function writeVarLen(value) {
   const bytes = [value & 0x7f];
@@ -183,7 +184,7 @@ function buildMidiFile(rootMidi, progression, melody, bpm = 100) {
   const chordNotes = [];
   fullChordNotes(rootMidi, progression).forEach((notes, i) => {
     notes.forEach((note) => {
-      chordNotes.push({ start: i * TICKS_PER_BEAT, dur: TICKS_PER_BEAT * 0.95, note });
+      chordNotes.push({ start: i * TICKS_PER_CHORD, dur: TICKS_PER_CHORD * 0.95, note });
     });
   });
   const melodyNotes = [];
@@ -699,13 +700,13 @@ export default function App() {
       const now = Tone.now() + 0.05;
       const voiced = fullChordNotes(rootMidi, progression);
       voiced.forEach((notes, i) => {
-        playNotes(notes.map(midiToNote), CHORD_DUR * 1.6, now + i * CHORD_DUR);
+        playNotes(notes.map(midiToNote), CHORD_DUR * 1.1, now + i * CHORD_DUR);
       });
       melody.forEach((deg, col) => {
         if (deg == null) return;
         const t = now + col * STEP_DUR;
         const note = midiToNote(extendedDegreeMidi(rootMidi, deg));
-        if (pianoReadyRef.current && pianoRef.current) pianoRef.current.triggerAttackRelease(note, STEP_DUR * 1.6, t);
+        if (pianoReadyRef.current && pianoRef.current) pianoRef.current.triggerAttackRelease(note, STEP_DUR * 1.1, t);
         else synthRef.current.triggerAttackRelease(note, STEP_DUR * 0.85, t);
       });
       const totalCols = progression.length * STEPS_PER_CHORD;
