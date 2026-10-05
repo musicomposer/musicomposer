@@ -41,21 +41,21 @@ const CHORDS = [
 
 /* 下拉選單用的性質與根音 */
 const CHORD_QUALITIES = [
-  { id: 'major', label: '大三和弦', suffix: '', iv: [0, 4, 7], tone: 'warm' },
-  { id: 'minor', label: '小三和弦', suffix: 'm', iv: [0, 3, 7], tone: 'cool' },
-  { id: 'dim', label: '減三和弦', suffix: 'dim', iv: [0, 3, 6], tone: 'cool' },
-  { id: 'aug', label: '增三和弦', suffix: 'aug', iv: [0, 4, 8], tone: 'warm' },
-  { id: '7', label: '屬七和弦', suffix: '7', iv: [0, 4, 7, 10], tone: 'warm' },
-  { id: 'm7', label: '小七和弦', suffix: 'm7', iv: [0, 3, 7, 10], tone: 'cool' },
-  { id: 'maj7', label: '大七和弦', suffix: 'maj7', iv: [0, 4, 7, 11], tone: 'warm' },
-  { id: 'dim7', label: '減七和弦', suffix: 'dim7', iv: [0, 3, 6, 9], tone: 'cool' },
-  { id: 'm7b5', label: '半減七和弦', suffix: 'm7♭5', iv: [0, 3, 6, 10], tone: 'cool' },
-  { id: 'sus4', label: '掛留四和弦', suffix: 'sus4', iv: [0, 5, 7], tone: 'neutral' },
-  { id: 'sus2', label: '掛留二和弦', suffix: 'sus2', iv: [0, 2, 7], tone: 'neutral' },
-  { id: '6', label: '六和弦', suffix: '6', iv: [0, 4, 7, 9], tone: 'warm' },
-  { id: 'm6', label: '小六和弦', suffix: 'm6', iv: [0, 3, 7, 9], tone: 'cool' },
-  { id: 'add9', label: '加九和弦', suffix: 'add9', iv: [0, 4, 7, 14], tone: 'warm' },
-  { id: '9', label: '屬九和弦', suffix: '9', iv: [0, 4, 7, 10, 14], tone: 'warm' },
+  { id: 'major', en: 'major', label: '大三和弦', suffix: '', iv: [0, 4, 7], tone: 'warm' },
+  { id: 'minor', en: 'minor', label: '小三和弦', suffix: 'm', iv: [0, 3, 7], tone: 'cool' },
+  { id: 'dim', en: 'dim', label: '減三和弦', suffix: 'dim', iv: [0, 3, 6], tone: 'cool' },
+  { id: 'aug', en: 'aug', label: '增三和弦', suffix: 'aug', iv: [0, 4, 8], tone: 'warm' },
+  { id: '7', en: '7', label: '屬七和弦', suffix: '7', iv: [0, 4, 7, 10], tone: 'warm' },
+  { id: 'm7', en: 'm7', label: '小七和弦', suffix: 'm7', iv: [0, 3, 7, 10], tone: 'cool' },
+  { id: 'maj7', en: 'maj7', label: '大七和弦', suffix: 'maj7', iv: [0, 4, 7, 11], tone: 'warm' },
+  { id: 'dim7', en: 'dim7', label: '減七和弦', suffix: 'dim7', iv: [0, 3, 6, 9], tone: 'cool' },
+  { id: 'm7b5', en: 'm7♭5', label: '半減七和弦', suffix: 'm7♭5', iv: [0, 3, 6, 10], tone: 'cool' },
+  { id: 'sus4', en: 'sus4', label: '掛留四和弦', suffix: 'sus4', iv: [0, 5, 7], tone: 'neutral' },
+  { id: 'sus2', en: 'sus2', label: '掛留二和弦', suffix: 'sus2', iv: [0, 2, 7], tone: 'neutral' },
+  { id: '6', en: '6', label: '六和弦', suffix: '6', iv: [0, 4, 7, 9], tone: 'warm' },
+  { id: 'm6', en: 'm6', label: '小六和弦', suffix: 'm6', iv: [0, 3, 7, 9], tone: 'cool' },
+  { id: 'add9', en: 'add9', label: '加九和弦', suffix: 'add9', iv: [0, 4, 7, 14], tone: 'warm' },
+  { id: '9', en: '9', label: '屬九和弦', suffix: '9', iv: [0, 4, 7, 10, 14], tone: 'warm' },
 ];
 
 const ROOT_LETTERS = [
@@ -1798,7 +1798,7 @@ function ChordPicker({ onPick }) {
         </select>
         <select value={qualIdx} onChange={(e) => setQualIdx(Number(e.target.value))} className={selectCls} aria-label="和弦性質">
           {CHORD_QUALITIES.map((q, i) => (
-            <option key={q.id} value={i}>{q.label}</option>
+            <option key={q.id} value={i}>{`${q.en}（${q.label}）`}</option>
           ))}
         </select>
 
