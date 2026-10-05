@@ -13,22 +13,62 @@ const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 
 const MAJOR_SCALE_OFFSETS = [0, 2, 4, 5, 7, 9, 11];
 const ROMAN = ['I', 'ii', 'iii', 'IV', 'V', 'vi', 'vii°'];
 
-/* C 大調常用和弦：degree 0–6 為三和弦，7–13 為七和弦（degree + 7） */
-const TRIAD_NAMES = ['C', 'Dm', 'Em', 'F', 'G', 'Am', 'Bdim'];
-const SEVENTH_NAMES = ['Cmaj7', 'Dm7', 'Em7', 'Fmaj7', 'G7', 'Am7', 'Bm7♭5'];
-const TRIAD_QUALITY = ['大三和弦', '小三和弦', '小三和弦', '大三和弦', '大三和弦', '小三和弦', '減三和弦'];
-const SEVENTH_QUALITY = ['大七和弦', '小七和弦', '小七和弦', '大七和弦', '屬七和弦', '小七和弦', '半減七和弦'];
+/* C 大調和弦庫：索引 0–6 三和弦、7–13 七和弦、14+ 色彩和弦
+   iv = 從根音算起的半音數；tone: warm 暖 / cool 冷 / neutral 中性 */
+const CHORDS = [
+  { sym: 'C', q: '大三和弦', rootDeg: 0, iv: [0, 4, 7], tone: 'warm' },
+  { sym: 'Dm', q: '小三和弦', rootDeg: 1, iv: [0, 3, 7], tone: 'cool' },
+  { sym: 'Em', q: '小三和弦', rootDeg: 2, iv: [0, 3, 7], tone: 'cool' },
+  { sym: 'F', q: '大三和弦', rootDeg: 3, iv: [0, 4, 7], tone: 'warm' },
+  { sym: 'G', q: '大三和弦', rootDeg: 4, iv: [0, 4, 7], tone: 'warm' },
+  { sym: 'Am', q: '小三和弦', rootDeg: 5, iv: [0, 3, 7], tone: 'cool' },
+  { sym: 'Bdim', q: '減三和弦', rootDeg: 6, iv: [0, 3, 6], tone: 'cool', rare: true },
+  { sym: 'Cmaj7', q: '大七和弦', rootDeg: 0, iv: [0, 4, 7, 11], tone: 'warm' },
+  { sym: 'Dm7', q: '小七和弦', rootDeg: 1, iv: [0, 3, 7, 10], tone: 'cool' },
+  { sym: 'Em7', q: '小七和弦', rootDeg: 2, iv: [0, 3, 7, 10], tone: 'cool' },
+  { sym: 'Fmaj7', q: '大七和弦', rootDeg: 3, iv: [0, 4, 7, 11], tone: 'warm' },
+  { sym: 'G7', q: '屬七和弦', rootDeg: 4, iv: [0, 4, 7, 10], tone: 'warm' },
+  { sym: 'Am7', q: '小七和弦', rootDeg: 5, iv: [0, 3, 7, 10], tone: 'cool' },
+  { sym: 'Bm7♭5', q: '半減七和弦', rootDeg: 6, iv: [0, 3, 6, 10], tone: 'cool' },
+  { sym: 'Csus4', q: '掛留四和弦', rootDeg: 0, iv: [0, 5, 7], tone: 'neutral' },
+  { sym: 'Gsus4', q: '掛留四和弦', rootDeg: 4, iv: [0, 5, 7], tone: 'neutral' },
+  { sym: 'Cadd9', q: '加九和弦', rootDeg: 0, iv: [0, 4, 7, 14], tone: 'warm' },
+  { sym: 'D7', q: '屬七和弦', rootDeg: 1, iv: [0, 4, 7, 10], tone: 'warm' },
+  { sym: 'E7', q: '屬七和弦', rootDeg: 2, iv: [0, 4, 7, 10], tone: 'warm' },
+  { sym: 'A7', q: '屬七和弦', rootDeg: 5, iv: [0, 4, 7, 10], tone: 'warm' },
+  { sym: 'Fm', q: '小三和弦', rootDeg: 3, iv: [0, 3, 7], tone: 'cool' },
+];
 
-function isSeventh(degree) {
-  return degree >= 7;
+function chordDef(degree) {
+  return CHORDS[degree] || CHORDS[0];
 }
 
 function chordSymbol(degree) {
-  return isSeventh(degree) ? SEVENTH_NAMES[degree - 7] : TRIAD_NAMES[degree];
+  return chordDef(degree).sym;
 }
 
 function chordQuality(degree) {
-  return isSeventh(degree) ? SEVENTH_QUALITY[degree - 7] : TRIAD_QUALITY[degree];
+  return chordDef(degree).q;
+}
+
+/* 進行裡的每一格：{ deg: 和弦索引, beats: 幾拍 }；相容舊資料（純數字） */
+function degOf(item) {
+  return typeof item === 'number' ? item : item.deg;
+}
+function beatsOf(item) {
+  return typeof item === 'number' ? 4 : (item.beats || 4);
+}
+function normalizeProgression(list) {
+  if (!Array.isArray(list)) return [];
+  return list.map((x) => (typeof x === 'number' ? { deg: x, beats: 4 } : { deg: x.deg, beats: x.beats || 4 }));
+}
+function columnOffset(prog, idx) {
+  let off = 0;
+  for (let i = 0; i < idx && i < prog.length; i += 1) off += beatsOf(prog[i]);
+  return off;
+}
+function totalBeats(prog) {
+  return prog.reduce((s, x) => s + beatsOf(x), 0);
 }
 
 function midiToNote(midi) {
@@ -44,11 +84,9 @@ function extendedDegreeMidi(rootMidi, extDeg) {
 }
 
 function chordMidiNotes(rootMidi, degree) {
-  if (degree >= 7) {
-    const base = degree - 7;
-    return [0, 2, 4, 6].map((o) => extendedDegreeMidi(rootMidi, base + o));
-  }
-  return [0, 2, 4].map((o) => extendedDegreeMidi(rootMidi, degree + o));
+  const def = chordDef(degree);
+  const root = rootMidi + MAJOR_SCALE_OFFSETS[((def.rootDeg % 7) + 7) % 7] + 12 * Math.floor(def.rootDeg / 7);
+  return def.iv.map((o) => root + o);
 }
 
 /* 聲部導向：在合理音域內找「離上一個和弦最近」的轉位，
@@ -93,8 +131,7 @@ function voiceLedNotes(rootMidi, degree, prevNotes) {
 /* 低音線：把根音放在 C2–G3 之間，選離上一個低音最近的八度（平手往下），
    產生譜例那種「下行低音」的感覺 */
 function bassNoteFor(rootMidi, degree, prevBass) {
-  const base = degree >= 7 ? degree - 7 : degree;
-  const pc = MAJOR_SCALE_OFFSETS[((base % 7) + 7) % 7];
+  const pc = MAJOR_SCALE_OFFSETS[((chordDef(degree).rootDeg % 7) + 7) % 7];
   const candidates = [];
   for (let n = 36; n <= 55; n += 12) {
     const note = n + pc;
@@ -113,16 +150,16 @@ function bassNoteFor(rootMidi, degree, prevBass) {
   return best;
 }
 
-const STEPS_PER_CHORD = 4;
-const CHORD_DUR = 2.4; // 每個和弦 4 拍（100bpm 下一小節）
-const STEP_DUR = CHORD_DUR / STEPS_PER_CHORD;
+/* 每個旋律格 = 1 拍；和弦長度 = 自己的拍數 */
+const BEAT_DUR = 0.6; // 100 BPM 下一拍
 
 /* 完整彈奏音：低音 + 聲部導向後的和弦（供播放與 MIDI 匯出共用） */
 function fullChordNotes(rootMidi, progression) {
   const out = [];
   let prevBass = null;
   let prevChord = null;
-  progression.forEach((deg) => {
+  progression.forEach((item) => {
+    const deg = degOf(item);
     const bass = bassNoteFor(rootMidi, deg, prevBass);
     const upper = voiceLedNotes(rootMidi, deg, prevChord);
     out.push([bass, ...upper]);
@@ -137,7 +174,6 @@ function fullChordNotes(rootMidi, progression) {
 /* ---------------------------------------------------------------- */
 
 const TICKS_PER_BEAT = 480;
-const TICKS_PER_CHORD = TICKS_PER_BEAT * 4; // 每個和弦 = 4 拍
 const TICKS_PER_STEP = TICKS_PER_BEAT; // 每個旋律格 = 1 拍
 
 function writeVarLen(value) {
@@ -182,10 +218,14 @@ function buildTrackChunk(notesList, channel, extraEventsAtStart = []) {
 
 function buildMidiFile(rootMidi, progression, melody, bpm = 100) {
   const chordNotes = [];
+  let chordTick = 0;
   fullChordNotes(rootMidi, progression).forEach((notes, i) => {
+    const beats = beatsOf(progression[i]);
+    const dur = beats * TICKS_PER_BEAT * 0.95;
     notes.forEach((note) => {
-      chordNotes.push({ start: i * TICKS_PER_CHORD, dur: TICKS_PER_CHORD * 0.95, note });
+      chordNotes.push({ start: chordTick, dur, note });
     });
+    chordTick += beats * TICKS_PER_BEAT;
   });
   const melodyNotes = [];
   melody.forEach((deg, col) => {
@@ -495,8 +535,10 @@ export default function App() {
   const [teacherMode, setTeacherMode] = useState(window.location.hash === '#teacher');
 
   const [page, setPage] = useState('overview');
-  const [progression, setProgression] = useState(PRESETS[0].degrees);
-  const [melody, setMelody] = useState(Array(PRESETS[0].degrees.length * STEPS_PER_CHORD).fill(null));
+  const [progression, setProgression] = useState(
+    PRESETS[0].degrees.map((d) => ({ deg: d, beats: 4 })),
+  );
+  const [melody, setMelody] = useState(Array(PRESETS[0].degrees.length * 4).fill(null));
   const [completed, setCompleted] = useState({});
   const [savedMsg, setSavedMsg] = useState('');
   const [copiedMsg, setCopiedMsg] = useState('');
@@ -598,8 +640,17 @@ export default function App() {
         const snap = await getDoc(doc(db, 'progress', user.uid));
         if (snap.exists()) {
           const data = snap.data();
-          if (Array.isArray(data.progression) && data.progression.length) setProgression(data.progression);
-          if (Array.isArray(data.melody)) setMelody(data.melody);
+          const loadedProg = Array.isArray(data.progression) && data.progression.length
+            ? normalizeProgression(data.progression)
+            : null;
+          if (loadedProg) setProgression(loadedProg);
+          if (Array.isArray(data.melody)) {
+            // 讓旋律長度跟進行的總拍數一致（舊資料可能是 4 拍制）
+            const target = totalBeats(loadedProg || progression);
+            const m = data.melody.slice(0, target);
+            while (m.length < target) m.push(null);
+            setMelody(m);
+          }
           if (data.completed) setCompleted(data.completed);
           if (data.lyricAnalysis) {
             setLyricAnalysis((prev) => ({
@@ -650,30 +701,64 @@ export default function App() {
   }
 
   function addToProgression(degree) {
-    setProgression((prev) => {
-      if (prev.length >= 8) return prev;
-      const next = [...prev, degree];
-      setMelody((m) => [...m, ...Array(STEPS_PER_CHORD).fill(null)]);
-      return next;
-    });
+    setProgression((prev) => [...prev, { deg: degree, beats: 4 }]);
+    setMelody((m) => [...m, ...Array(4).fill(null)]);
   }
 
   function removeFromProgression(idx) {
+    const off = columnOffset(progression, idx);
+    const len = beatsOf(progression[idx]);
     setProgression((prev) => prev.filter((_, i) => i !== idx));
     setMelody((prev) => {
       const next = [...prev];
-      next.splice(idx * STEPS_PER_CHORD, STEPS_PER_CHORD);
+      next.splice(off, len);
       return next;
     });
   }
 
+  function changeBeats(idx, beats) {
+    const b = Math.max(1, Math.min(8, beats));
+    const item = progression[idx];
+    if (!item || beatsOf(item) === b) return;
+    const off = columnOffset(progression, idx);
+    const oldLen = beatsOf(item);
+    setProgression((prev) => prev.map((x, i) => (i === idx ? { deg: degOf(x), beats: b } : x)));
+    setMelody((prev) => {
+      const next = [...prev];
+      if (b > oldLen) next.splice(off + oldLen, 0, ...Array(b - oldLen).fill(null));
+      else next.splice(off + b, oldLen - b);
+      return next;
+    });
+  }
+
+  function moveChord(from, to) {
+    if (from === to || from < 0 || to < 0 || from >= progression.length || to >= progression.length) return;
+    // 把旋律切成「每格和弦一段」，跟和弦一起搬家
+    const segs = [];
+    let off = 0;
+    progression.forEach((x) => {
+      const len = beatsOf(x);
+      const seg = melody.slice(off, off + len);
+      while (seg.length < len) seg.push(null);
+      segs.push(seg);
+      off += len;
+    });
+    const items = [...progression];
+    const [item] = items.splice(from, 1);
+    const [seg] = segs.splice(from, 1);
+    items.splice(to, 0, item);
+    segs.splice(to, 0, seg);
+    setProgression(items);
+    setMelody(segs.flat());
+  }
+
   function loadPreset(preset) {
-    setProgression(preset.degrees);
-    setMelody(Array(preset.degrees.length * STEPS_PER_CHORD).fill(null));
+    setProgression(preset.degrees.map((d) => ({ deg: d, beats: 4 })));
+    setMelody(Array(preset.degrees.length * 4).fill(null));
   }
 
   function copyChords() {
-    const text = progression.map((d) => chordSymbol(d)).join(' – ');
+    const text = progression.map((x) => chordSymbol(degOf(x))).join(' – ');
     const done = () => {
       setCopiedMsg('已複製');
       setTimeout(() => setCopiedMsg(''), 1800);
@@ -699,24 +784,27 @@ export default function App() {
       setIsPlaying(true);
       const now = Tone.now() + 0.05;
       const voiced = fullChordNotes(rootMidi, progression);
+      let chordCol = 0;
       voiced.forEach((notes, i) => {
-        playNotes(notes.map(midiToNote), CHORD_DUR * 1.1, now + i * CHORD_DUR);
+        const beats = beatsOf(progression[i]);
+        playNotes(notes.map(midiToNote), beats * BEAT_DUR * 1.1, now + chordCol * BEAT_DUR);
+        chordCol += beats;
       });
       melody.forEach((deg, col) => {
         if (deg == null) return;
-        const t = now + col * STEP_DUR;
+        const t = now + col * BEAT_DUR;
         const note = midiToNote(extendedDegreeMidi(rootMidi, deg));
-        if (pianoReadyRef.current && pianoRef.current) pianoRef.current.triggerAttackRelease(note, STEP_DUR * 1.1, t);
-        else synthRef.current.triggerAttackRelease(note, STEP_DUR * 0.85, t);
+        if (pianoReadyRef.current && pianoRef.current) pianoRef.current.triggerAttackRelease(note, BEAT_DUR * 1.1, t);
+        else synthRef.current.triggerAttackRelease(note, BEAT_DUR * 0.85, t);
       });
-      const totalCols = progression.length * STEPS_PER_CHORD;
+      const totalCols = totalBeats(progression);
       for (let col = 0; col < totalCols; col++) {
-        setTimeout(() => setPlayheadCol(col), col * STEP_DUR * 1000 + 50);
+        setTimeout(() => setPlayheadCol(col), col * BEAT_DUR * 1000 + 50);
       }
       setTimeout(() => {
         setIsPlaying(false);
         setPlayheadCol(-1);
-      }, totalCols * STEP_DUR * 1000 + 300);
+      }, totalCols * BEAT_DUR * 1000 + 300);
     });
   }
 
@@ -813,6 +901,8 @@ export default function App() {
             playChord={playChord}
             addToProgression={addToProgression}
             removeFromProgression={removeFromProgression}
+            changeBeats={changeBeats}
+            moveChord={moveChord}
             loadPreset={loadPreset}
             playAll={playAll}
             isPlaying={isPlaying}
@@ -1638,10 +1728,12 @@ function GeneralLyricsContent({ rhymeOn, setRhymeOn }) {
 
 function ChordsPage({
   progression, playChord, addToProgression,
-  removeFromProgression, loadPreset, playAll, isPlaying, done, toggleDone, onSave, savedMsg,
+  removeFromProgression, changeBeats, moveChord,
+  loadPreset, playAll, isPlaying, done, toggleDone, onSave, savedMsg,
   onExportMidi, onCopyChords, copiedMsg,
 }) {
   const [zoomImg, setZoomImg] = useState(null);
+  const [dragIdx, setDragIdx] = useState(null);
   return (
     <div>
       <div className="flex items-center justify-between gap-4 mb-1">
@@ -1688,59 +1780,41 @@ function ChordsPage({
 
       <Panel className="mb-6">
         <p className="text-sm text-[#A9AFC3] mb-3">C 大調的常用和弦（點一下試聽並加入進行）</p>
-        <div className="grid grid-cols-4 sm:grid-cols-7 gap-2">
-          {TRIAD_NAMES.map((sym, d) => {
-            const isDim = d === 6;
-            const isMajor = TRIAD_QUALITY[d] === '大三和弦';
-            return (
-              <button
-                key={sym}
-                onClick={() => {
-                  playChord(d);
-                  addToProgression(d);
-                }}
-                disabled={progression.length >= 8}
-                className={`flex flex-col items-center gap-1 border rounded-md py-3 transition-colors disabled:opacity-40 ${
-                  isDim
-                    ? 'border-[#333B52] opacity-50 hover:opacity-100 hover:border-[#A9AFC3]'
-                    : isMajor
-                      ? 'border-[#333B52] hover:border-[#E8A33D]'
-                      : 'border-[#333B52] hover:border-[#6FA8DC]'
-                }`}
-              >
-                <span className={`font-serif text-lg ${isDim ? 'text-[#A9AFC3]' : isMajor ? 'text-[#E8A33D]' : 'text-[#6FA8DC]'}`}>
-                  {sym}
-                </span>
-                <span className="text-[11px] text-[#A9AFC3] text-center leading-tight">{TRIAD_QUALITY[d]}</span>
-                {isDim && <span className="text-[10px] text-[#6B7285]">較少用</span>}
-              </button>
-            );
-          })}
-        </div>
 
-        <p className="text-sm text-[#A9AFC3] mb-3 mt-6">七和弦（加一個音，色彩更豐富）</p>
-        <div className="grid grid-cols-4 sm:grid-cols-7 gap-2">
-          {SEVENTH_NAMES.map((sym, i) => {
-            const d = i + 7;
-            const isMajor = SEVENTH_QUALITY[i] === '大七和弦' || SEVENTH_QUALITY[i] === '屬七和弦';
-            return (
-              <button
-                key={sym}
-                onClick={() => {
-                  playChord(d);
-                  addToProgression(d);
-                }}
-                disabled={progression.length >= 8}
-                className={`flex flex-col items-center gap-1 border border-[#333B52] rounded-md py-3 transition-colors disabled:opacity-40 ${
-                  isMajor ? 'hover:border-[#E8A33D]' : 'hover:border-[#6FA8DC]'
-                }`}
-              >
-                <span className={`font-serif text-base ${isMajor ? 'text-[#E8A33D]' : 'text-[#6FA8DC]'}`}>{sym}</span>
-                <span className="text-[11px] text-[#A9AFC3] text-center leading-tight">{SEVENTH_QUALITY[i]}</span>
-              </button>
-            );
-          })}
-        </div>
+        {[
+          { label: null, from: 0, to: 7 },
+          { label: '七和弦（加一個音，色彩更豐富）', from: 7, to: 14 },
+          { label: '色彩和弦（變化更多元）', from: 14, to: CHORDS.length },
+        ].map((row, rowIdx) => (
+          <div key={row.label || 'triad'} className={rowIdx > 0 ? 'mt-6' : ''}>
+            {row.label && <p className="text-sm text-[#A9AFC3] mb-3">{row.label}</p>}
+            <div className="grid grid-cols-4 sm:grid-cols-7 gap-2">
+              {CHORDS.slice(row.from, row.to).map((c, j) => {
+                const d = row.from + j;
+                const isWarm = c.tone === 'warm';
+                const isCool = c.tone === 'cool';
+                return (
+                  <button
+                    key={c.sym}
+                    onClick={() => {
+                      playChord(d);
+                      addToProgression(d);
+                    }}
+                    className={`flex flex-col items-center gap-1 border border-[#333B52] rounded-md py-3 transition-colors ${
+                      c.rare ? 'opacity-50 hover:opacity-100' : ''
+                    } ${isWarm ? 'hover:border-[#E8A33D]' : isCool ? 'hover:border-[#6FA8DC]' : 'hover:border-[#A9AFC3]'}`}
+                  >
+                    <span className={`font-serif ${rowIdx === 0 ? 'text-lg' : 'text-base'} ${isWarm ? 'text-[#E8A33D]' : isCool ? 'text-[#6FA8DC]' : 'text-[#A9AFC3]'}`}>
+                      {c.sym}
+                    </span>
+                    <span className="text-[11px] text-[#A9AFC3] text-center leading-tight">{c.q}</span>
+                    {c.rare && <span className="text-[10px] text-[#6B7285]">較少用</span>}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ))}
       </Panel>
 
       <Panel className="mb-6">
@@ -1829,7 +1903,7 @@ function ChordsPage({
 
       <Panel>
         <div className="flex items-center justify-between mb-3">
-          <p className="text-sm text-[#A9AFC3]">我的和弦進行（最多 8 個）</p>
+          <p className="text-sm text-[#A9AFC3]">我的和弦進行（可拖曳調整順序、增減拍數）</p>
           <span className="text-xs">
             {copiedMsg && <span className="text-[#8FBF9F] mr-3">{copiedMsg}</span>}
             {savedMsg && <span className="text-[#8FBF9F]">{savedMsg}</span>}
@@ -1839,14 +1913,50 @@ function ChordsPage({
           <p className="text-sm text-[#A9AFC3] mb-4">還沒有和弦，點上面的和弦按鈕開始建立吧。</p>
         ) : (
           <div className="flex flex-wrap gap-2 mb-5">
-            {progression.map((d, i) => (
-              <span key={i} className="inline-flex items-center gap-2 bg-[#1F2430] border border-[#333B52] rounded-md px-3 py-1.5 text-sm">
-                {chordSymbol(d)}
-                <button onClick={() => removeFromProgression(i)} className="text-[#A9AFC3] hover:text-[#E1685B]">
-                  <X size={13} />
-                </button>
-              </span>
-            ))}
+            {progression.map((item, i) => {
+              const d = degOf(item);
+              const beats = beatsOf(item);
+              const isWarm = chordDef(d).tone === 'warm';
+              const isCool = chordDef(d).tone === 'cool';
+              return (
+                <span
+                  key={i}
+                  draggable
+                  onDragStart={() => setDragIdx(i)}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={() => {
+                    if (dragIdx != null) moveChord(dragIdx, i);
+                    setDragIdx(null);
+                  }}
+                  className={`inline-flex items-center gap-1.5 bg-[#1F2430] border rounded-md px-3 py-1.5 text-sm cursor-grab active:cursor-grabbing ${
+                    dragIdx === i ? 'border-[#E8A33D] opacity-60' : 'border-[#333B52]'
+                  }`}
+                  title="拖曳可以換順序"
+                >
+                  <span className={`font-medium ${isWarm ? 'text-[#E8A33D]' : isCool ? 'text-[#6FA8DC]' : 'text-[#A9AFC3]'}`}>
+                    {chordSymbol(d)}
+                  </span>
+                  <span className="inline-flex items-center gap-1 border-l border-[#333B52] pl-1.5">
+                    <button
+                      onClick={() => changeBeats(i, beats - 1)}
+                      disabled={beats <= 1}
+                      aria-label="減少拍數"
+                      className="w-5 h-5 rounded bg-[#252B3B] text-[#A9AFC3] hover:text-[#F2EFE9] disabled:opacity-30 leading-none"
+                    >−</button>
+                    <span className="text-[11px] text-[#A9AFC3] w-7 text-center">{beats} 拍</span>
+                    <button
+                      onClick={() => changeBeats(i, beats + 1)}
+                      disabled={beats >= 8}
+                      aria-label="增加拍數"
+                      className="w-5 h-5 rounded bg-[#252B3B] text-[#A9AFC3] hover:text-[#F2EFE9] disabled:opacity-30 leading-none"
+                    >＋</button>
+                  </span>
+                  <button onClick={() => removeFromProgression(i)} className="text-[#A9AFC3] hover:text-[#E1685B] ml-0.5">
+                    <X size={13} />
+                  </button>
+                </span>
+              );
+            })}
           </div>
         )}
         <div className="flex flex-wrap gap-3">
@@ -1919,24 +2029,29 @@ function MelodyPage({
       ) : (
         <Panel>
           <div className="flex text-xs text-[#A9AFC3] mb-2 pl-10">
-            {progression.map((d, i) => (
-              <div key={i} style={{ flex: STEPS_PER_CHORD }} className="text-center">
-                {chordSymbol(d)}
+            {progression.map((item, i) => (
+              <div key={i} style={{ flex: beatsOf(item) }} className="text-center">
+                {chordSymbol(degOf(item))}
               </div>
             ))}
           </div>
           <div className="overflow-x-auto">
-            <div style={{ minWidth: progression.length * STEPS_PER_CHORD * 34 + 40 }}>
+            <div style={{ minWidth: totalBeats(progression) * 34 + 40 }}>
               {rows.map((rowDeg) => (
                 <div key={rowDeg} className="flex items-center">
                   <div className="w-10 text-[11px] text-[#A9AFC3] shrink-0 text-right pr-2">
                     {ROMAN[rowDeg % 7] === 'I' && rowDeg === 7 ? 'I·' : ROMAN[rowDeg % 7]}
                   </div>
-                  {progression.map((chordDeg, chordIdx) => {
-                    const chordTones = [0, 2, 4].map((o) => (chordDeg + o) % 7);
-                    const isChordTone = chordTones.includes(((rowDeg % 7) + 7) % 7);
-                    return Array.from({ length: STEPS_PER_CHORD }).map((_, s) => {
-                      const col = chordIdx * STEPS_PER_CHORD + s;
+                  {progression.map((item, chordIdx) => {
+                    const def = chordDef(degOf(item));
+                    const rootPc = MAJOR_SCALE_OFFSETS[((def.rootDeg % 7) + 7) % 7];
+                    const chordPcs = def.iv.map((o) => (rootPc + o) % 12);
+                    const rowPc = MAJOR_SCALE_OFFSETS[((rowDeg % 7) + 7) % 7];
+                    const isChordTone = chordPcs.includes(rowPc);
+                    const beats = beatsOf(item);
+                    const colStart = columnOffset(progression, chordIdx);
+                    return Array.from({ length: beats }).map((_, s) => {
+                      const col = colStart + s;
                       const active = melody[col] === rowDeg;
                       const isPlayhead = playheadCol === col;
                       return (
@@ -2057,7 +2172,7 @@ function TeacherDashboard() {
       const entries = s.lyricAnalysis?.entries || [];
       const custom = s.lyricAnalysis?.custom || {};
       const subj = s.subjectLyrics || {};
-      const progression = (s.progression || []).map((d) => chordSymbol(d)).join(' → ');
+      const progression = (s.progression || []).map((d) => chordSymbol(degOf(d))).join(' → ');
 
       return [
         info.className || '',
@@ -2251,7 +2366,7 @@ function TeacherDashboard() {
                           <div>
                             <p className="text-xs text-[#E8A33D] mb-2">和弦進行</p>
                             <p className="text-sm">
-                              {s.progression.map((d) => chordSymbol(d)).join(' → ')}
+                              {s.progression.map((d) => chordSymbol(degOf(d))).join(' → ')}
                             </p>
                           </div>
                         )}
