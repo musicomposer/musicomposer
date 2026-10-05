@@ -182,8 +182,25 @@ function bassNoteFor(rootMidi, degree, prevBass) {
   return best;
 }
 
-/* 每個旋律格 = 1 拍；和弦長度 = 自己的拍數 */
-const BEAT_DUR = 0.6; // 100 BPM 下一拍
+/* 每個旋律格 = 1 拍（拍號的分母）；每個和弦 = 1 小節 */
+const BEAT_DUR = 0.6; // 100 BPM 下四分音符一秒數
+
+const TIME_SIGNATURES = [
+  { id: '4/4', num: 4, den: 4 },
+  { id: '3/4', num: 3, den: 4 },
+  { id: '2/4', num: 2, den: 4 },
+  { id: '6/8', num: 6, den: 8 },
+];
+
+function tsDef(id) {
+  return TIME_SIGNATURES.find((t) => t.id === id) || TIME_SIGNATURES[0];
+}
+function unitDur(id) {
+  return (BEAT_DUR * 4) / tsDef(id).den; // 每格秒數（6/8 的一格是八分音符）
+}
+function unitTicks(id) {
+  return (TICKS_PER_BEAT * 4) / tsDef(id).den; // 每格 ticks
+}
 
 /* 完整彈奏音：低音 + 聲部導向後的和弦（供播放與 MIDI 匯出共用） */
 function fullChordNotes(rootMidi, progression) {
@@ -206,7 +223,6 @@ function fullChordNotes(rootMidi, progression) {
 /* ---------------------------------------------------------------- */
 
 const TICKS_PER_BEAT = 480;
-const TICKS_PER_STEP = TICKS_PER_BEAT; // 每個旋律格 = 1 拍
 
 function writeVarLen(value) {
   const bytes = [value & 0x7f];
@@ -248,27 +264,30 @@ function buildTrackChunk(notesList, channel, extraEventsAtStart = []) {
   return [...header, ...bytes];
 }
 
-function buildMidiFile(rootMidi, progression, melody, bpm = 100) {
+function buildMidiFile(rootMidi, progression, melody, timeSig = '4/4', bpm = 100) {
+  const ticks = unitTicks(timeSig);
   const chordNotes = [];
   let chordTick = 0;
   fullChordNotes(rootMidi, progression).forEach((notes, i) => {
     const beats = beatsOf(progression[i]);
-    const dur = beats * TICKS_PER_BEAT * 0.95;
+    const dur = beats * ticks * 0.95;
     notes.forEach((note) => {
       chordNotes.push({ start: chordTick, dur, note });
     });
-    chordTick += beats * TICKS_PER_BEAT;
+    chordTick += beats * ticks;
   });
   const melodyNotes = [];
   melody.forEach((deg, col) => {
     if (deg == null) return;
-    melodyNotes.push({ start: col * TICKS_PER_STEP, dur: TICKS_PER_STEP * 0.9, note: extendedDegreeMidi(rootMidi, deg) });
+    melodyNotes.push({ start: col * ticks, dur: ticks * 0.9, note: extendedDegreeMidi(rootMidi, deg) });
   });
 
   const microsPerBeat = Math.round(60000000 / bpm);
   const tempoEvent = [0x00, 0xff, 0x51, 0x03, (microsPerBeat >> 16) & 0xff, (microsPerBeat >> 8) & 0xff, microsPerBeat & 0xff];
+  const ts = tsDef(timeSig);
+  const tsEvent = [0x00, 0xff, 0x58, 0x04, ts.num, Math.log2(ts.den), 24, 8]; // 拍號資訊
 
-  const track1 = buildTrackChunk(chordNotes, 0, tempoEvent); // 和弦
+  const track1 = buildTrackChunk(chordNotes, 0, [...tempoEvent, ...tsEvent]); // 和弦
   const track2 = buildTrackChunk(melodyNotes, 1); // 旋律
 
   const header = [0x4d, 0x54, 0x68, 0x64, ...u32(6), ...u16(1), ...u16(2), ...u16(TICKS_PER_BEAT)]; // 'MThd'
@@ -287,8 +306,8 @@ function fallbackCopy(text, done) {
   done();
 }
 
-function downloadMidi(rootMidi, progression, melody) {
-  const bytes = buildMidiFile(rootMidi, progression, melody);
+function downloadMidi(rootMidi, progression, melody, timeSig = '4/4') {
+  const bytes = buildMidiFile(rootMidi, progression, melody, timeSig);
   const blob = new Blob([bytes], { type: 'audio/midi' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -567,6 +586,7 @@ export default function App() {
   const [teacherMode, setTeacherMode] = useState(window.location.hash === '#teacher');
 
   const [page, setPage] = useState('overview');
+  const [timeSig, setTimeSig] = useState('4/4'); // 拍號：每個和弦固定一個小節
   const [progression, setProgression] = useState(
     PRESETS[0].degrees.map((d) => ({ deg: d, beats: 4 })),
   );
@@ -672,6 +692,7 @@ export default function App() {
         const snap = await getDoc(doc(db, 'progress', user.uid));
         if (snap.exists()) {
           const data = snap.data();
+          if (data.timeSig && tsDef(data.timeSig)) setTimeSig(data.timeSig);
           const loadedProg = Array.isArray(data.progression) && data.progression.length
             ? normalizeProgression(data.progression)
             : null;
@@ -709,7 +730,7 @@ export default function App() {
     async (patch) => {
       if (!loadedRef.current || !user) return;
       try {
-        const payload = { progression, melody, completed, lyricAnalysis, subjectLyrics, ...patch };
+        const payload = { progression, melody, timeSig, completed, lyricAnalysis, subjectLyrics, ...patch };
         await setDoc(doc(db, 'progress', user.uid), payload, { merge: true });
         setSavedMsg('已儲存');
         setTimeout(() => setSavedMsg(''), 1800);
@@ -718,7 +739,7 @@ export default function App() {
         setTimeout(() => setSavedMsg(''), 2200);
       }
     },
-    [user, progression, melody, completed, lyricAnalysis, subjectLyrics]
+    [user, progression, melody, timeSig, completed, lyricAnalysis, subjectLyrics]
   );
 
   async function ensureAudio() {
@@ -733,10 +754,11 @@ export default function App() {
   }
 
   function addToProgression(chord) {
-    // chord 可以是和弦索引（數字），也可以是下拉選單產生的自訂和弦定義
-    const entry = typeof chord === 'number' ? { deg: chord, beats: 4 } : { ...chord, beats: 4 };
+    // chord 可以是和弦索引（數字），也可以是下拉選單產生的自訂和弦定義；一個和弦 = 一個小節
+    const beats = tsDef(timeSig).num;
+    const entry = typeof chord === 'number' ? { deg: chord, beats } : { ...chord, beats };
     setProgression((prev) => [...prev, entry]);
-    setMelody((m) => [...m, ...Array(4).fill(null)]);
+    setMelody((m) => [...m, ...Array(beats).fill(null)]);
   }
 
   function removeFromProgression(idx) {
@@ -750,18 +772,23 @@ export default function App() {
     });
   }
 
-  function changeBeats(idx, beats) {
-    const b = Math.max(1, Math.min(8, beats));
-    const item = progression[idx];
-    if (!item || beatsOf(item) === b) return;
-    const off = columnOffset(progression, idx);
-    const oldLen = beatsOf(item);
-    setProgression((prev) => prev.map((x, i) => (i === idx ? (typeof x === 'number' ? { deg: x, beats: b } : { ...x, beats: b }) : x)));
+  function changeTimeSig(nextSig) {
+    if (!tsDef(nextSig) || nextSig === timeSig) return;
+    const num = tsDef(nextSig).num;
+    setTimeSig(nextSig);
+    // 每個和弦固定一個小節：重設拍數，並把旋律每段調整成新的格數
+    setProgression((prev) => prev.map((x) => (typeof x === 'number' ? { deg: x, beats: num } : { ...x, beats: num })));
     setMelody((prev) => {
-      const next = [...prev];
-      if (b > oldLen) next.splice(off + oldLen, 0, ...Array(b - oldLen).fill(null));
-      else next.splice(off + b, oldLen - b);
-      return next;
+      const out = [];
+      let off = 0;
+      progression.forEach((x) => {
+        const oldLen = beatsOf(x);
+        const seg = prev.slice(off, off + oldLen).slice(0, num);
+        while (seg.length < num) seg.push(null);
+        out.push(...seg);
+        off += oldLen;
+      });
+      return out;
     });
   }
 
@@ -787,8 +814,9 @@ export default function App() {
   }
 
   function loadPreset(preset) {
-    setProgression(preset.degrees.map((d) => ({ deg: d, beats: 4 })));
-    setMelody(Array(preset.degrees.length * 4).fill(null));
+    const beats = tsDef(timeSig).num;
+    setProgression(preset.degrees.map((d) => ({ deg: d, beats })));
+    setMelody(Array(preset.degrees.length * beats).fill(null));
   }
 
   function copyChords() {
@@ -817,28 +845,29 @@ export default function App() {
     ensureAudio().then(() => {
       setIsPlaying(true);
       const now = Tone.now() + 0.05;
+      const dur = unitDur(timeSig); // 一格的秒數
       const voiced = fullChordNotes(rootMidi, progression);
       let chordCol = 0;
       voiced.forEach((notes, i) => {
         const beats = beatsOf(progression[i]);
-        playNotes(notes.map(midiToNote), beats * BEAT_DUR * 1.1, now + chordCol * BEAT_DUR);
+        playNotes(notes.map(midiToNote), beats * dur * 1.1, now + chordCol * dur);
         chordCol += beats;
       });
       melody.forEach((deg, col) => {
         if (deg == null) return;
-        const t = now + col * BEAT_DUR;
+        const t = now + col * dur;
         const note = midiToNote(extendedDegreeMidi(rootMidi, deg));
-        if (pianoReadyRef.current && pianoRef.current) pianoRef.current.triggerAttackRelease(note, BEAT_DUR * 1.1, t);
-        else synthRef.current.triggerAttackRelease(note, BEAT_DUR * 0.85, t);
+        if (pianoReadyRef.current && pianoRef.current) pianoRef.current.triggerAttackRelease(note, dur * 1.1, t);
+        else synthRef.current.triggerAttackRelease(note, dur * 0.85, t);
       });
       const totalCols = totalBeats(progression);
       for (let col = 0; col < totalCols; col++) {
-        setTimeout(() => setPlayheadCol(col), col * BEAT_DUR * 1000 + 50);
+        setTimeout(() => setPlayheadCol(col), col * dur * 1000 + 50);
       }
       setTimeout(() => {
         setIsPlaying(false);
         setPlayheadCol(-1);
-      }, totalCols * BEAT_DUR * 1000 + 300);
+      }, totalCols * dur * 1000 + 300);
     });
   }
 
@@ -935,7 +964,8 @@ export default function App() {
             playChord={playChord}
             addToProgression={addToProgression}
             removeFromProgression={removeFromProgression}
-            changeBeats={changeBeats}
+            timeSig={timeSig}
+            changeTimeSig={changeTimeSig}
             moveChord={moveChord}
             loadPreset={loadPreset}
             playAll={playAll}
@@ -944,7 +974,7 @@ export default function App() {
             toggleDone={() => toggleComplete('chords')}
             onSave={() => persist({})}
             savedMsg={savedMsg}
-            onExportMidi={() => downloadMidi(rootMidi, progression, melody)}
+            onExportMidi={() => downloadMidi(rootMidi, progression, melody, timeSig)}
             onCopyChords={copyChords}
             copiedMsg={copiedMsg}
           />
@@ -954,6 +984,7 @@ export default function App() {
           <MelodyPage
             progression={progression}
             melody={melody}
+            timeSig={timeSig}
             toggleMelodyCell={toggleMelodyCell}
             playAll={playAll}
             isPlaying={isPlaying}
@@ -963,7 +994,7 @@ export default function App() {
             toggleDone={() => toggleComplete('melody')}
             onSave={() => persist({})}
             savedMsg={savedMsg}
-            onExportMidi={() => downloadMidi(rootMidi, progression, melody)}
+            onExportMidi={() => downloadMidi(rootMidi, progression, melody, timeSig)}
           />
         )}
 
@@ -1828,7 +1859,7 @@ function ChordPicker({ onPick }) {
 
 function ChordsPage({
   progression, playChord, addToProgression,
-  removeFromProgression, changeBeats, moveChord,
+  removeFromProgression, timeSig, changeTimeSig, moveChord,
   loadPreset, playAll, isPlaying, done, toggleDone, onSave, savedMsg,
   onExportMidi, onCopyChords, copiedMsg,
 }) {
@@ -2011,12 +2042,26 @@ function ChordsPage({
       </Panel>
 
       <Panel>
-        <div className="flex items-center justify-between mb-3">
-          <p className="text-sm text-[#A9AFC3]">我的和弦進行（可拖曳調整順序）</p>
-          <span className="text-xs">
-            {copiedMsg && <span className="text-[#8FBF9F] mr-3">{copiedMsg}</span>}
-            {savedMsg && <span className="text-[#8FBF9F]">{savedMsg}</span>}
-          </span>
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+          <p className="text-sm text-[#A9AFC3]">我的和弦進行（一個和弦 = 一個小節，可拖曳調整順序）</p>
+          <div className="flex items-center gap-2">
+            <label htmlFor="time-sig" className="text-xs text-[#A9AFC3]">拍號</label>
+            <select
+              id="time-sig"
+              value={timeSig}
+              onChange={(e) => changeTimeSig(e.target.value)}
+              className="bg-[#1F2430] border border-[#333B52] rounded-md px-2 py-1.5 text-sm text-[#F2EFE9] focus:border-[#E8A33D] outline-none"
+            >
+              {TIME_SIGNATURES.map((t) => (
+                <option key={t.id} value={t.id}>{t.id}</option>
+              ))}
+            </select>
+            <span className="text-xs text-[#A9AFC3]">每小節 {tsDef(timeSig).num} 拍</span>
+            <span className="text-xs">
+              {copiedMsg && <span className="text-[#8FBF9F] mr-3">{copiedMsg}</span>}
+              {savedMsg && <span className="text-[#8FBF9F]">{savedMsg}</span>}
+            </span>
+          </div>
         </div>
         {progression.length === 0 ? (
           <p className="text-sm text-[#A9AFC3] mb-4">還沒有和弦，點上面的和弦按鈕開始建立吧。</p>
@@ -2040,6 +2085,7 @@ function ChordsPage({
                   }`}
                   title="拖曳可以換順序"
                 >
+                  <span className="text-[10px] text-[#6B7285] leading-none">{i + 1}</span>
                   <span className={`font-medium ${isWarm ? 'text-[#E8A33D]' : isCool ? 'text-[#6FA8DC]' : 'text-[#A9AFC3]'}`}>
                     {chordSymbol(item)}
                   </span>
@@ -2093,7 +2139,7 @@ function ChordsPage({
 /* ---------------------------------------------------------------- */
 
 function MelodyPage({
-  progression, melody, toggleMelodyCell, playAll, isPlaying, playheadCol,
+  progression, melody, timeSig, toggleMelodyCell, playAll, isPlaying, playheadCol,
   goToChords, done, toggleDone, onSave, savedMsg, onExportMidi,
 }) {
   const rows = [7, 6, 5, 4, 3, 2, 1, 0]; // extended degrees, high to low
@@ -2120,9 +2166,20 @@ function MelodyPage({
         </Panel>
       ) : (
         <Panel>
-          <div className="flex text-xs text-[#A9AFC3] mb-2 pl-10">
+          <div className="flex text-[11px] text-[#6B7285] mb-1 pl-10">
             {progression.map((item, i) => (
               <div key={i} style={{ flex: beatsOf(item) }} className="text-center">
+                第 {i + 1} 小節
+              </div>
+            ))}
+          </div>
+          <div className="flex text-xs text-[#A9AFC3] mb-2 pl-10">
+            {progression.map((item, i) => (
+              <div
+                key={i}
+                style={{ flex: beatsOf(item) }}
+                className={`text-center ${i > 0 ? 'border-l border-[#4A5169]' : ''}`}
+              >
                 {chordSymbol(item)}
               </div>
             ))}
@@ -2146,6 +2203,7 @@ function MelodyPage({
                       const col = colStart + s;
                       const active = melody[col] === rowDeg;
                       const isPlayhead = playheadCol === col;
+                      const isBarLine = s === 0 && chordIdx > 0; // 小節線
                       return (
                         <button
                           key={col}
@@ -2153,7 +2211,9 @@ function MelodyPage({
                           style={{ flex: 1 }}
                           className={`h-8 border border-[#1B1F2A] transition-colors ${
                             active ? 'bg-[#E1685B]' : isChordTone ? 'bg-[#2C3346]' : 'bg-[#1F2430]'
-                          } ${isPlayhead ? 'ring-1 ring-inset ring-[#E8A33D]' : ''} hover:bg-[#333B52]`}
+                          } ${isBarLine ? 'border-l-2 border-l-[#4A5169]' : ''} ${
+                            isPlayhead ? 'ring-1 ring-inset ring-[#E8A33D]' : ''
+                          } hover:bg-[#333B52]`}
                         />
                       );
                     });
