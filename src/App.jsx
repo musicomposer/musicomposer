@@ -2087,6 +2087,7 @@ function ChordsPage({
         {progression.length === 0 ? (
           <p className="text-sm text-[#A9AFC3] mb-4">還沒有和弦，點上面的和弦按鈕開始建立吧。</p>
         ) : (
+          <>
           <div className="flex flex-wrap gap-2 mb-5">
             {progression.map((item, i) => {
               const isWarm = chordOf(item).tone === 'warm';
@@ -2143,6 +2144,7 @@ function ChordsPage({
               兩個半小節就會合成一個小節（例如第二小節放兩個和弦）；再按一次還原。
             </p>
           )}
+          </>
         )}
         <div className="flex flex-wrap gap-3">
           <button
