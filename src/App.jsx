@@ -1805,10 +1805,16 @@ function ChordPicker({ onPick }) {
         <span className="font-serif text-lg ml-1 min-w-[4.5rem] text-[#F2EFE9]">{sym}</span>
 
         <button
-          onClick={() => onPick(chord)}
+          onClick={() => onPick(chord, 'play')}
+          className="inline-flex items-center gap-2 border border-[#333B52] rounded-md px-4 py-2 text-sm text-[#A9AFC3] hover:text-[#F2EFE9] hover:border-[#E8A33D] transition-colors"
+        >
+          <Play size={15} /> 試聽
+        </button>
+        <button
+          onClick={() => onPick(chord, 'add')}
           className="inline-flex items-center gap-2 bg-[#E8A33D] text-[#1B1F2A] font-medium rounded-md px-4 py-2 text-sm"
         >
-          <Play size={15} /> 試聽並加入
+          加入進行
         </button>
       </div>
       <p className="text-xs text-[#A9AFC3] mt-2">15 種性質 × 12 種根音，加進去的和弦跟上面的按鈕一樣會一起播放與匯出。</p>
@@ -1910,9 +1916,12 @@ function ChordsPage({
         ))}
 
         <ChordPicker
-          onPick={(chord) => {
-            playChord(chord);
-            addToProgression(chord);
+          onPick={(chord, action) => {
+            if (action === 'play') playChord(chord);
+            else {
+              addToProgression(chord);
+              playChord(chord); // 加入時也響一聲當作回饋
+            }
           }}
         />
       </Panel>
