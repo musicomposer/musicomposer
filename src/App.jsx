@@ -772,6 +772,24 @@ export default function App() {
     });
   }
 
+  // 把某個和弦切成半小節（或還原成整小節），一個小節就能放兩個和弦
+  function toggleHalf(idx) {
+    const num = tsDef(timeSig).num;
+    if (num % 2 !== 0) return; // 3/4 等奇數拍無法對半
+    const item = progression[idx];
+    if (!item) return;
+    const cur = beatsOf(item);
+    const next = cur === num ? num / 2 : num;
+    const off = columnOffset(progression, idx);
+    setProgression((prev) => prev.map((x, i) => (i === idx ? (typeof x === 'number' ? { deg: x, beats: next } : { ...x, beats: next }) : x)));
+    setMelody((prev) => {
+      const nextMelody = [...prev];
+      if (next > cur) nextMelody.splice(off + cur, 0, ...Array(next - cur).fill(null));
+      else nextMelody.splice(off + next, cur - next);
+      return nextMelody;
+    });
+  }
+
   function changeTimeSig(nextSig) {
     if (!tsDef(nextSig) || nextSig === timeSig) return;
     const num = tsDef(nextSig).num;
@@ -966,6 +984,7 @@ export default function App() {
             removeFromProgression={removeFromProgression}
             timeSig={timeSig}
             changeTimeSig={changeTimeSig}
+            toggleHalf={toggleHalf}
             moveChord={moveChord}
             loadPreset={loadPreset}
             playAll={playAll}
@@ -1859,12 +1878,14 @@ function ChordPicker({ onPick }) {
 
 function ChordsPage({
   progression, playChord, addToProgression,
-  removeFromProgression, timeSig, changeTimeSig, moveChord,
+  removeFromProgression, timeSig, changeTimeSig, toggleHalf, moveChord,
   loadPreset, playAll, isPlaying, done, toggleDone, onSave, savedMsg,
   onExportMidi, onCopyChords, copiedMsg,
 }) {
   const [zoomImg, setZoomImg] = useState(null);
   const [dragIdx, setDragIdx] = useState(null);
+  const beatsPerBar = tsDef(timeSig).num;
+  const canHalf = beatsPerBar % 2 === 0;
   return (
     <div>
       <div className="flex items-center justify-between gap-4 mb-1">
@@ -2070,6 +2091,11 @@ function ChordsPage({
             {progression.map((item, i) => {
               const isWarm = chordOf(item).tone === 'warm';
               const isCool = chordOf(item).tone === 'cool';
+              const beats = beatsOf(item);
+              const isHalf = beats < beatsPerBar;
+              // 小節編號：依累積拍數算，半小節會跟前一個和弦同小節
+              const measureNo = Math.floor(columnOffset(progression, i) / beatsPerBar) + 1;
+              const startsMeasure = columnOffset(progression, i) % beatsPerBar === 0;
               return (
                 <span
                   key={i}
@@ -2082,13 +2108,28 @@ function ChordsPage({
                   }}
                   className={`inline-flex items-center gap-2 bg-[#1F2430] border rounded-md px-3 py-1.5 text-sm cursor-grab active:cursor-grabbing ${
                     dragIdx === i ? 'border-[#E8A33D] opacity-60' : 'border-[#333B52]'
-                  }`}
+                  } ${!startsMeasure ? 'border-l-2 border-l-[#E8A33D]/60' : ''}`}
                   title="拖曳可以換順序"
                 >
-                  <span className="text-[10px] text-[#6B7285] leading-none">{i + 1}</span>
+                  <span className="text-[10px] text-[#6B7285] leading-none">
+                    {startsMeasure ? measureNo : `${measureNo}·`}
+                  </span>
                   <span className={`font-medium ${isWarm ? 'text-[#E8A33D]' : isCool ? 'text-[#6FA8DC]' : 'text-[#A9AFC3]'}`}>
                     {chordSymbol(item)}
                   </span>
+                  {canHalf && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); toggleHalf(i); }}
+                      title={isHalf ? '還原成整小節' : '切成半小節（一個小節放兩個和弦）'}
+                      className={`text-[10px] border rounded px-1 leading-none py-0.5 transition-colors ${
+                        isHalf
+                          ? 'border-[#E8A33D] text-[#E8A33D]'
+                          : 'border-[#333B52] text-[#6B7285] hover:text-[#A9AFC3] hover:border-[#A9AFC3]'
+                      }`}
+                    >
+                      ½
+                    </button>
+                  )}
                   <button onClick={() => removeFromProgression(i)} className="text-[#A9AFC3] hover:text-[#E1685B]">
                     <X size={13} />
                   </button>
@@ -2096,6 +2137,12 @@ function ChordsPage({
               );
             })}
           </div>
+          {canHalf && (
+            <p className="text-xs text-[#A9AFC3] -mt-3 mb-4">
+              按 <span className="text-[#E8A33D] border border-[#333B52] rounded px-1 text-[10px]">½</span> 可把和弦切成半小節，
+              兩個半小節就會合成一個小節（例如第二小節放兩個和弦）；再按一次還原。
+            </p>
+          )}
         )}
         <div className="flex flex-wrap gap-3">
           <button
@@ -2167,22 +2214,33 @@ function MelodyPage({
       ) : (
         <Panel>
           <div className="flex text-[11px] text-[#6B7285] mb-1 pl-10">
-            {progression.map((item, i) => (
-              <div key={i} style={{ flex: beatsOf(item) }} className="text-center">
-                第 {i + 1} 小節
-              </div>
-            ))}
+            {progression.map((item, i) => {
+              const beatsPerBar = tsDef(timeSig).num;
+              const colStart = columnOffset(progression, i);
+              const isBarStart = colStart % beatsPerBar === 0;
+              const measureNo = Math.floor(colStart / beatsPerBar) + 1;
+              return (
+                <div key={i} style={{ flex: beatsOf(item) }} className="text-center">
+                  {isBarStart ? `第 ${measureNo} 小節` : '〃'}
+                </div>
+              );
+            })}
           </div>
           <div className="flex text-xs text-[#A9AFC3] mb-2 pl-10">
-            {progression.map((item, i) => (
-              <div
-                key={i}
-                style={{ flex: beatsOf(item) }}
-                className={`text-center ${i > 0 ? 'border-l border-[#4A5169]' : ''}`}
-              >
-                {chordSymbol(item)}
-              </div>
-            ))}
+            {progression.map((item, i) => {
+              const beatsPerBar = tsDef(timeSig).num;
+              const colStart = columnOffset(progression, i);
+              const isBarStart = colStart % beatsPerBar === 0;
+              return (
+                <div
+                  key={i}
+                  style={{ flex: beatsOf(item) }}
+                  className={`text-center ${isBarStart && i > 0 ? 'border-l border-[#4A5169]' : ''}`}
+                >
+                  {chordSymbol(item)}
+                </div>
+              );
+            })}
           </div>
           <div className="overflow-x-auto">
             <div style={{ minWidth: totalBeats(progression) * 34 + 40 }}>
@@ -2199,11 +2257,12 @@ function MelodyPage({
                     const isChordTone = chordPcs.includes(rowPc);
                     const beats = beatsOf(item);
                     const colStart = columnOffset(progression, chordIdx);
+                    const beatsPerBar = tsDef(timeSig).num;
                     return Array.from({ length: beats }).map((_, s) => {
                       const col = colStart + s;
                       const active = melody[col] === rowDeg;
                       const isPlayhead = playheadCol === col;
-                      const isBarLine = s === 0 && chordIdx > 0; // 小節線
+                      const isBarLine = col > 0 && col % beatsPerBar === 0; // 小節線
                       return (
                         <button
                           key={col}
