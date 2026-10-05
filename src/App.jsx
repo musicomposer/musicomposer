@@ -1944,6 +1944,16 @@ function ChordsPage({
   const [dragChord, setDragChord] = useState(null);    // 上方和弦按鈕的拖曳來源（度數）
   const beatsPerBar = tsDef(timeSig).num;
   const canHalf = beatsPerBar % 2 === 0;
+
+  // 依小節分組：同一小節的和弦包在同一個框裡
+  const measureMap = new Map();
+  progression.forEach((item, i) => {
+    const off = columnOffset(progression, i);
+    const no = Math.floor(off / beatsPerBar) + 1;
+    if (!measureMap.has(no)) measureMap.set(no, { no, chords: [] });
+    measureMap.get(no).chords.push({ item, i, second: off % beatsPerBar !== 0 });
+  });
+  const measures = [...measureMap.values()];
   return (
     <div>
       <div className="flex items-center justify-between gap-4 mb-1">
@@ -2160,7 +2170,7 @@ function ChordsPage({
         ) : (
           <>
           <div
-            className="flex flex-wrap gap-2 mb-5"
+            className="flex flex-wrap gap-3 mb-5"
             onDragOver={(e) => e.preventDefault()}
             onDrop={(e) => {
               e.stopPropagation();
@@ -2170,72 +2180,97 @@ function ChordsPage({
               setDragChord(null);
             }}
           >
-            {progression.map((item, i) => {
-              const def = chordOf(item);
-              const isWarm = def.tone === 'warm';
-              const isCool = def.tone === 'cool';
-              const beats = beatsOf(item);
-              const isHalf = beats < beatsPerBar;
-              // 小節編號：依累積拍數算，半小節會跟前一個和弦同小節
-              const measureNo = Math.floor(columnOffset(progression, i) / beatsPerBar) + 1;
-              const startsMeasure = columnOffset(progression, i) % beatsPerBar === 0;
+            {measures.map((m) => {
+              const firstIdx = m.chords[0].i;
+              const lastIdx = m.chords[m.chords.length - 1].i;
+              const onlyFull = m.chords.length === 1 && beatsOf(m.chords[0].item) === beatsPerBar;
               return (
-                <span
-                  key={i}
-                  draggable
-                  onDragStart={() => setDragIdx(i)}
+                <div
+                  key={m.no}
                   onDragOver={(e) => e.preventDefault()}
                   onDrop={(e) => {
                     e.stopPropagation();
-                    if (dragChord != null) insertChordAt(i, dragChord);
-                    else if (dragIdx != null && dragIdx !== i) moveChord(dragIdx, i);
+                    if (dragChord != null) {
+                      // 這個小節只有一個整和弦 → 放進後半；否則加到這個小節後面
+                      if (onlyFull && canHalf) insertSecondHalf(firstIdx, dragChord);
+                      else insertChordAt(lastIdx + 1, dragChord);
+                    } else if (dragIdx != null) {
+                      moveChord(dragIdx, firstIdx);
+                    }
                     setDragIdx(null);
                     setDragChord(null);
                   }}
-                  className={`inline-flex items-center gap-2 bg-[#1F2430] border rounded-md px-3 py-1.5 text-sm cursor-grab active:cursor-grabbing ${
-                    dragIdx === i ? 'border-[#E8A33D] opacity-60' : 'border-[#333B52]'
-                  } ${dragChord != null ? 'border-dashed border-[#E8A33D]/70' : ''} ${
-                    !startsMeasure ? 'border-l-2 border-l-[#E8A33D]/60' : ''
+                  className={`flex items-stretch bg-[#1F2430] border rounded-md overflow-hidden transition-colors ${
+                    dragChord != null
+                      ? 'border-dashed border-[#E8A33D]/70'
+                      : 'border-[#333B52]'
                   }`}
                   title="拖曳可以換順序，或把上面的和弦拖進來"
                 >
-                  <span className="text-[10px] text-[#6B7285] leading-none">
-                    {startsMeasure ? measureNo : `${measureNo}·`}
+                  <span className="flex items-center px-2 text-[10px] text-[#6B7285] bg-[#171B24] border-r border-[#333B52] leading-none">
+                    {m.no}
                   </span>
-                  <span className={`font-medium ${isWarm ? 'text-[#E8A33D]' : isCool ? 'text-[#6FA8DC]' : 'text-[#A9AFC3]'}`}>
-                    {def.sym}
-                  </span>
-                  {canHalf && !isHalf && (
-                    <button
-                      onClick={(e) => { e.stopPropagation(); insertSecondHalf(i); }}
-                      onDragOver={(e) => e.preventDefault()}
-                      onDrop={(e) => {
-                        e.stopPropagation();
-                        if (dragChord != null) insertSecondHalf(i, dragChord);
-                        setDragChord(null);
-                        setDragIdx(null);
-                      }}
-                      title="把和弦拖進來，放進這個小節的後半"
-                      className={`text-[10px] border rounded px-1 leading-none py-0.5 transition-colors ${
-                        dragChord != null
-                          ? 'border-[#E8A33D] text-[#E8A33D] bg-[#E8A33D]/10'
-                          : 'border-[#333B52] text-[#6B7285] hover:text-[#E8A33D] hover:border-[#E8A33D]'
-                      }`}
-                    >
-                      ＋
-                    </button>
-                  )}
-                  <button onClick={() => removeFromProgression(i)} className="text-[#A9AFC3] hover:text-[#E1685B]">
-                    <X size={13} />
-                  </button>
-                </span>
+                  <div className="flex items-stretch">
+                    {m.chords.map(({ item, i, second }) => {
+                      const def = chordOf(item);
+                      const isWarm = def.tone === 'warm';
+                      const isCool = def.tone === 'cool';
+                      const isHalf = beatsOf(item) < beatsPerBar;
+                      return (
+                        <span
+                          key={i}
+                          draggable
+                          onDragStart={() => setDragIdx(i)}
+                          onDragOver={(e) => e.preventDefault()}
+                          onDrop={(e) => {
+                            e.stopPropagation();
+                            if (dragChord != null) insertChordAt(i, dragChord);
+                            else if (dragIdx != null && dragIdx !== i) moveChord(dragIdx, i);
+                            setDragIdx(null);
+                            setDragChord(null);
+                          }}
+                          className={`inline-flex items-center gap-2 px-3 py-1.5 text-sm cursor-grab active:cursor-grabbing ${
+                            second ? 'border-l-2 border-l-[#E8A33D]/60' : ''
+                          } ${dragIdx === i ? 'opacity-60 bg-[#E8A33D]/10' : ''}`}
+                        >
+                          <span className={`font-medium ${isWarm ? 'text-[#E8A33D]' : isCool ? 'text-[#6FA8DC]' : 'text-[#A9AFC3]'}`}>
+                            {def.sym}
+                          </span>
+                          {canHalf && !isHalf && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); insertSecondHalf(i); }}
+                              onDragOver={(e) => e.preventDefault()}
+                              onDrop={(e) => {
+                                e.stopPropagation();
+                                if (dragChord != null) insertSecondHalf(i, dragChord);
+                                setDragChord(null);
+                                setDragIdx(null);
+                              }}
+                              title="把和弦拖進來，放進這個小節的後半"
+                              className={`text-[10px] border rounded px-1 leading-none py-0.5 transition-colors ${
+                                dragChord != null
+                                  ? 'border-[#E8A33D] text-[#E8A33D] bg-[#E8A33D]/10'
+                                  : 'border-[#333B52] text-[#6B7285] hover:text-[#E8A33D] hover:border-[#E8A33D]'
+                              }`}
+                            >
+                              ＋
+                            </button>
+                          )}
+                          <button onClick={() => removeFromProgression(i)} className="text-[#A9AFC3] hover:text-[#E1685B]">
+                            <X size={13} />
+                          </button>
+                        </span>
+                      );
+                    })}
+                  </div>
+                </div>
               );
             })}
           </div>
           {canHalf && (
             <p className="text-xs text-[#A9AFC3] -mt-3 mb-4">
-              把上面的和弦<span className="text-[#E8A33D]">拖進 ＋</span>，就能放進那個小節的後半，一個小節放兩個和弦；
-              也可以拖到和弦上插隊、拖到空白處加到最後。點一下上面的和弦則是直接加到進行最後面。
+              左邊數字是小節編號；把上面的和弦<span className="text-[#E8A33D]">拖進 ＋ 或小節框裡</span>，
+              就能放進那個小節的後半，一個小節放兩個和弦。也可以拖到和弦上插隊、拖到空白處加到最後。
             </p>
           )}
           </>
