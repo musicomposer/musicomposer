@@ -39,28 +39,60 @@ const CHORDS = [
   { sym: 'Fm', q: '小三和弦', rootDeg: 3, iv: [0, 3, 7], tone: 'cool' },
 ];
 
-function chordDef(degree) {
-  return CHORDS[degree] || CHORDS[0];
+/* 下拉選單用的性質與根音 */
+const CHORD_QUALITIES = [
+  { id: 'major', label: '大三和弦', suffix: '', iv: [0, 4, 7], tone: 'warm' },
+  { id: 'minor', label: '小三和弦', suffix: 'm', iv: [0, 3, 7], tone: 'cool' },
+  { id: 'dim', label: '減三和弦', suffix: 'dim', iv: [0, 3, 6], tone: 'cool' },
+  { id: 'aug', label: '增三和弦', suffix: 'aug', iv: [0, 4, 8], tone: 'warm' },
+  { id: '7', label: '屬七和弦', suffix: '7', iv: [0, 4, 7, 10], tone: 'warm' },
+  { id: 'm7', label: '小七和弦', suffix: 'm7', iv: [0, 3, 7, 10], tone: 'cool' },
+  { id: 'maj7', label: '大七和弦', suffix: 'maj7', iv: [0, 4, 7, 11], tone: 'warm' },
+  { id: 'dim7', label: '減七和弦', suffix: 'dim7', iv: [0, 3, 6, 9], tone: 'cool' },
+  { id: 'm7b5', label: '半減七和弦', suffix: 'm7♭5', iv: [0, 3, 6, 10], tone: 'cool' },
+  { id: 'sus4', label: '掛留四和弦', suffix: 'sus4', iv: [0, 5, 7], tone: 'neutral' },
+  { id: 'sus2', label: '掛留二和弦', suffix: 'sus2', iv: [0, 2, 7], tone: 'neutral' },
+  { id: '6', label: '六和弦', suffix: '6', iv: [0, 4, 7, 9], tone: 'warm' },
+  { id: 'm6', label: '小六和弦', suffix: 'm6', iv: [0, 3, 7, 9], tone: 'cool' },
+  { id: 'add9', label: '加九和弦', suffix: 'add9', iv: [0, 4, 7, 14], tone: 'warm' },
+  { id: '9', label: '屬九和弦', suffix: '9', iv: [0, 4, 7, 10, 14], tone: 'warm' },
+];
+
+const ROOT_LETTERS = [
+  { name: 'C', pc: 0 }, { name: 'D', pc: 2 }, { name: 'E', pc: 4 }, { name: 'F', pc: 5 },
+  { name: 'G', pc: 7 }, { name: 'A', pc: 9 }, { name: 'B', pc: 11 },
+];
+const ACCIDENTALS = [{ label: '無', delta: 0 }, { label: '♯', delta: 1 }, { label: '♭', delta: -1 }];
+
+function chordOf(item) {
+  if (item == null) return CHORDS[0];
+  if (typeof item === 'number') return CHORDS[item] || CHORDS[0];
+  if (item.sym) return item; // 自訂和弦（下拉選單加入）
+  return CHORDS[item.deg] || CHORDS[0];
 }
 
-function chordSymbol(degree) {
-  return chordDef(degree).sym;
+function chordSymbol(item) {
+  return chordOf(item).sym;
 }
 
-function chordQuality(degree) {
-  return chordDef(degree).q;
+function chordQuality(item) {
+  return chordOf(item).q;
 }
 
-/* 進行裡的每一格：{ deg: 和弦索引, beats: 幾拍 }；相容舊資料（純數字） */
-function degOf(item) {
-  return typeof item === 'number' ? item : item.deg;
+function chordRootMidi(rootMidi, def) {
+  if (def.rootPc != null) return rootMidi + def.rootPc;
+  return rootMidi + MAJOR_SCALE_OFFSETS[((def.rootDeg % 7) + 7) % 7] + 12 * Math.floor(def.rootDeg / 7);
 }
 function beatsOf(item) {
   return typeof item === 'number' ? 4 : (item.beats || 4);
 }
 function normalizeProgression(list) {
   if (!Array.isArray(list)) return [];
-  return list.map((x) => (typeof x === 'number' ? { deg: x, beats: 4 } : { deg: x.deg, beats: x.beats || 4 }));
+  return list.map((x) => {
+    if (typeof x === 'number') return { deg: x, beats: 4 };
+    if (x.sym) return { ...x, beats: x.beats || 4 }; // 自訂和弦（下拉選單加入）
+    return { deg: x.deg, beats: x.beats || 4 };
+  });
 }
 function columnOffset(prog, idx) {
   let off = 0;
@@ -84,8 +116,8 @@ function extendedDegreeMidi(rootMidi, extDeg) {
 }
 
 function chordMidiNotes(rootMidi, degree) {
-  const def = chordDef(degree);
-  const root = rootMidi + MAJOR_SCALE_OFFSETS[((def.rootDeg % 7) + 7) % 7] + 12 * Math.floor(def.rootDeg / 7);
+  const def = chordOf(degree);
+  const root = chordRootMidi(rootMidi, def);
   return def.iv.map((o) => root + o);
 }
 
@@ -131,7 +163,7 @@ function voiceLedNotes(rootMidi, degree, prevNotes) {
 /* 低音線：把根音放在 C2–G3 之間，選離上一個低音最近的八度（平手往下），
    產生譜例那種「下行低音」的感覺 */
 function bassNoteFor(rootMidi, degree, prevBass) {
-  const pc = MAJOR_SCALE_OFFSETS[((chordDef(degree).rootDeg % 7) + 7) % 7];
+  const pc = ((chordRootMidi(rootMidi, chordOf(degree)) - rootMidi) % 12 + 12) % 12;
   const candidates = [];
   for (let n = 36; n <= 55; n += 12) {
     const note = n + pc;
@@ -159,9 +191,9 @@ function fullChordNotes(rootMidi, progression) {
   let prevBass = null;
   let prevChord = null;
   progression.forEach((item) => {
-    const deg = degOf(item);
-    const bass = bassNoteFor(rootMidi, deg, prevBass);
-    const upper = voiceLedNotes(rootMidi, deg, prevChord);
+    const chord = chordOf(item);
+    const bass = bassNoteFor(rootMidi, chord, prevBass);
+    const upper = voiceLedNotes(rootMidi, chord, prevChord);
     out.push([bass, ...upper]);
     prevBass = bass;
     prevChord = upper;
@@ -700,8 +732,10 @@ export default function App() {
     });
   }
 
-  function addToProgression(degree) {
-    setProgression((prev) => [...prev, { deg: degree, beats: 4 }]);
+  function addToProgression(chord) {
+    // chord 可以是和弦索引（數字），也可以是下拉選單產生的自訂和弦定義
+    const entry = typeof chord === 'number' ? { deg: chord, beats: 4 } : { ...chord, beats: 4 };
+    setProgression((prev) => [...prev, entry]);
     setMelody((m) => [...m, ...Array(4).fill(null)]);
   }
 
@@ -722,7 +756,7 @@ export default function App() {
     if (!item || beatsOf(item) === b) return;
     const off = columnOffset(progression, idx);
     const oldLen = beatsOf(item);
-    setProgression((prev) => prev.map((x, i) => (i === idx ? { deg: degOf(x), beats: b } : x)));
+    setProgression((prev) => prev.map((x, i) => (i === idx ? (typeof x === 'number' ? { deg: x, beats: b } : { ...x, beats: b }) : x)));
     setMelody((prev) => {
       const next = [...prev];
       if (b > oldLen) next.splice(off + oldLen, 0, ...Array(b - oldLen).fill(null));
@@ -758,7 +792,7 @@ export default function App() {
   }
 
   function copyChords() {
-    const text = progression.map((x) => chordSymbol(degOf(x))).join(' – ');
+    const text = progression.map((x) => chordSymbol(x)).join(' – ');
     const done = () => {
       setCopiedMsg('已複製');
       setTimeout(() => setCopiedMsg(''), 1800);
@@ -1723,6 +1757,66 @@ function GeneralLyricsContent({ rhymeOn, setRhymeOn }) {
 }
 
 /* ---------------------------------------------------------------- */
+/* 第三排：下拉選單選和弦（根音 + 升降記號 + 性質）                      */
+/* ---------------------------------------------------------------- */
+
+function ChordPicker({ onPick }) {
+  const [rootIdx, setRootIdx] = useState(0);
+  const [accIdx, setAccIdx] = useState(0);
+  const [qualIdx, setQualIdx] = useState(0);
+
+  const root = ROOT_LETTERS[rootIdx];
+  const acc = ACCIDENTALS[accIdx];
+  const qual = CHORD_QUALITIES[qualIdx];
+  const rootPc = (((root.pc + acc.delta) % 12) + 12) % 12;
+  const sym = `${root.name}${acc.label === '無' ? '' : acc.label}${qual.suffix}`;
+
+  const chord = {
+    sym,
+    q: qual.label,
+    rootPc,
+    iv: qual.iv,
+    tone: qual.tone,
+  };
+
+  const selectCls =
+    'bg-[#1F2430] border border-[#333B52] rounded-md px-2 py-2 text-sm text-[#F2EFE9] focus:border-[#E8A33D] outline-none';
+
+  return (
+    <div className="mt-6 pt-5 border-t border-[#333B52]">
+      <p className="text-sm text-[#A9AFC3] mb-3">自己配一個和弦（選根音、升降記號與性質）</p>
+      <div className="flex flex-wrap items-center gap-2">
+        <select value={rootIdx} onChange={(e) => setRootIdx(Number(e.target.value))} className={selectCls} aria-label="根音">
+          {ROOT_LETTERS.map((r, i) => (
+            <option key={r.name} value={i}>{r.name}</option>
+          ))}
+        </select>
+        <select value={accIdx} onChange={(e) => setAccIdx(Number(e.target.value))} className={selectCls} aria-label="升降記號">
+          {ACCIDENTALS.map((a, i) => (
+            <option key={a.label} value={i}>{a.label}</option>
+          ))}
+        </select>
+        <select value={qualIdx} onChange={(e) => setQualIdx(Number(e.target.value))} className={selectCls} aria-label="和弦性質">
+          {CHORD_QUALITIES.map((q, i) => (
+            <option key={q.id} value={i}>{q.label}</option>
+          ))}
+        </select>
+
+        <span className="font-serif text-lg ml-1 min-w-[4.5rem] text-[#F2EFE9]">{sym}</span>
+
+        <button
+          onClick={() => onPick(chord)}
+          className="inline-flex items-center gap-2 bg-[#E8A33D] text-[#1B1F2A] font-medium rounded-md px-4 py-2 text-sm"
+        >
+          <Play size={15} /> 試聽並加入
+        </button>
+      </div>
+      <p className="text-xs text-[#A9AFC3] mt-2">15 種性質 × 12 種根音，加進去的和弦跟上面的按鈕一樣會一起播放與匯出。</p>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------- */
 /* 章節三：和弦進行                                                     */
 /* ---------------------------------------------------------------- */
 
@@ -1784,7 +1878,6 @@ function ChordsPage({
         {[
           { label: null, from: 0, to: 7 },
           { label: '七和弦（加一個音，色彩更豐富）', from: 7, to: 14 },
-          { label: '色彩和弦（變化更多元）', from: 14, to: CHORDS.length },
         ].map((row, rowIdx) => (
           <div key={row.label || 'triad'} className={rowIdx > 0 ? 'mt-6' : ''}>
             {row.label && <p className="text-sm text-[#A9AFC3] mb-3">{row.label}</p>}
@@ -1815,6 +1908,13 @@ function ChordsPage({
             </div>
           </div>
         ))}
+
+        <ChordPicker
+          onPick={(chord) => {
+            playChord(chord);
+            addToProgression(chord);
+          }}
+        />
       </Panel>
 
       <Panel className="mb-6">
@@ -1903,7 +2003,7 @@ function ChordsPage({
 
       <Panel>
         <div className="flex items-center justify-between mb-3">
-          <p className="text-sm text-[#A9AFC3]">我的和弦進行（可拖曳調整順序、增減拍數）</p>
+          <p className="text-sm text-[#A9AFC3]">我的和弦進行（可拖曳調整順序）</p>
           <span className="text-xs">
             {copiedMsg && <span className="text-[#8FBF9F] mr-3">{copiedMsg}</span>}
             {savedMsg && <span className="text-[#8FBF9F]">{savedMsg}</span>}
@@ -1914,10 +2014,8 @@ function ChordsPage({
         ) : (
           <div className="flex flex-wrap gap-2 mb-5">
             {progression.map((item, i) => {
-              const d = degOf(item);
-              const beats = beatsOf(item);
-              const isWarm = chordDef(d).tone === 'warm';
-              const isCool = chordDef(d).tone === 'cool';
+              const isWarm = chordOf(item).tone === 'warm';
+              const isCool = chordOf(item).tone === 'cool';
               return (
                 <span
                   key={i}
@@ -1928,30 +2026,15 @@ function ChordsPage({
                     if (dragIdx != null) moveChord(dragIdx, i);
                     setDragIdx(null);
                   }}
-                  className={`inline-flex items-center gap-1.5 bg-[#1F2430] border rounded-md px-3 py-1.5 text-sm cursor-grab active:cursor-grabbing ${
+                  className={`inline-flex items-center gap-2 bg-[#1F2430] border rounded-md px-3 py-1.5 text-sm cursor-grab active:cursor-grabbing ${
                     dragIdx === i ? 'border-[#E8A33D] opacity-60' : 'border-[#333B52]'
                   }`}
                   title="拖曳可以換順序"
                 >
                   <span className={`font-medium ${isWarm ? 'text-[#E8A33D]' : isCool ? 'text-[#6FA8DC]' : 'text-[#A9AFC3]'}`}>
-                    {chordSymbol(d)}
+                    {chordSymbol(item)}
                   </span>
-                  <span className="inline-flex items-center gap-1 border-l border-[#333B52] pl-1.5">
-                    <button
-                      onClick={() => changeBeats(i, beats - 1)}
-                      disabled={beats <= 1}
-                      aria-label="減少拍數"
-                      className="w-5 h-5 rounded bg-[#252B3B] text-[#A9AFC3] hover:text-[#F2EFE9] disabled:opacity-30 leading-none"
-                    >−</button>
-                    <span className="text-[11px] text-[#A9AFC3] w-7 text-center">{beats} 拍</span>
-                    <button
-                      onClick={() => changeBeats(i, beats + 1)}
-                      disabled={beats >= 8}
-                      aria-label="增加拍數"
-                      className="w-5 h-5 rounded bg-[#252B3B] text-[#A9AFC3] hover:text-[#F2EFE9] disabled:opacity-30 leading-none"
-                    >＋</button>
-                  </span>
-                  <button onClick={() => removeFromProgression(i)} className="text-[#A9AFC3] hover:text-[#E1685B] ml-0.5">
+                  <button onClick={() => removeFromProgression(i)} className="text-[#A9AFC3] hover:text-[#E1685B]">
                     <X size={13} />
                   </button>
                 </span>
@@ -2031,7 +2114,7 @@ function MelodyPage({
           <div className="flex text-xs text-[#A9AFC3] mb-2 pl-10">
             {progression.map((item, i) => (
               <div key={i} style={{ flex: beatsOf(item) }} className="text-center">
-                {chordSymbol(degOf(item))}
+                {chordSymbol(item)}
               </div>
             ))}
           </div>
@@ -2043,8 +2126,8 @@ function MelodyPage({
                     {ROMAN[rowDeg % 7] === 'I' && rowDeg === 7 ? 'I·' : ROMAN[rowDeg % 7]}
                   </div>
                   {progression.map((item, chordIdx) => {
-                    const def = chordDef(degOf(item));
-                    const rootPc = MAJOR_SCALE_OFFSETS[((def.rootDeg % 7) + 7) % 7];
+                    const def = chordOf(item);
+                    const rootPc = def.rootPc != null ? def.rootPc : MAJOR_SCALE_OFFSETS[((def.rootDeg % 7) + 7) % 7];
                     const chordPcs = def.iv.map((o) => (rootPc + o) % 12);
                     const rowPc = MAJOR_SCALE_OFFSETS[((rowDeg % 7) + 7) % 7];
                     const isChordTone = chordPcs.includes(rowPc);
@@ -2172,7 +2255,7 @@ function TeacherDashboard() {
       const entries = s.lyricAnalysis?.entries || [];
       const custom = s.lyricAnalysis?.custom || {};
       const subj = s.subjectLyrics || {};
-      const progression = (s.progression || []).map((d) => chordSymbol(degOf(d))).join(' → ');
+      const progression = (s.progression || []).map((d) => chordSymbol(d)).join(' → ');
 
       return [
         info.className || '',
@@ -2366,7 +2449,7 @@ function TeacherDashboard() {
                           <div>
                             <p className="text-xs text-[#E8A33D] mb-2">和弦進行</p>
                             <p className="text-sm">
-                              {s.progression.map((d) => chordSymbol(degOf(d))).join(' → ')}
+                              {s.progression.map((d) => chordSymbol(d)).join(' → ')}
                             </p>
                           </div>
                         )}
