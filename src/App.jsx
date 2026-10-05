@@ -764,30 +764,75 @@ export default function App() {
   function removeFromProgression(idx) {
     const off = columnOffset(progression, idx);
     const len = beatsOf(progression[idx]);
-    setProgression((prev) => prev.filter((_, i) => i !== idx));
+    const nextList = progression.filter((_, i) => i !== idx);
+    const nextMelody = [...melody];
+    nextMelody.splice(off, len);
+    // 半小節必須兩兩成對：拆掉一個時，落單的半小節自動補回整小節
+    const repaired = repairHalves(nextList, nextMelody);
+    setProgression(repaired.list);
+    setMelody(repaired.melody);
+  }
+
+  function repairHalves(list, mel) {
+    const num = tsDef(timeSig).num;
+    if (num % 2 !== 0 || !Array.isArray(list)) return { list, melody: mel };
+    const half = num / 2;
+    const out = [];
+    const outMel = [];
+    let i = 0;
+    let srcOff = 0;
+    while (i < list.length) {
+      const item = list[i];
+      const b = beatsOf(item);
+      const seg = mel.slice(srcOff, srcOff + b);
+      srcOff += b;
+      if (b === half) {
+        const nxt = list[i + 1];
+        if (nxt && beatsOf(nxt) === half) {
+          const seg2 = mel.slice(srcOff, srcOff + half);
+          srcOff += half;
+          out.push(item, nxt);
+          outMel.push(...seg, ...seg2);
+          i += 2;
+          continue;
+        }
+        const full = typeof item === 'number' ? { deg: item, beats: num } : { ...item, beats: num };
+        while (seg.length < num) seg.push(null);
+        out.push(full);
+        outMel.push(...seg);
+        i += 1;
+        continue;
+      }
+      out.push(item);
+      outMel.push(...seg);
+      i += 1;
+    }
+    return { list: out, melody: outMel };
+  }
+
+  // 按「＋」：這格切成半小節，後半插入一個新和弦，湊成完整一小節
+  function insertSecondHalf(idx) {
+    const num = tsDef(timeSig).num;
+    if (num % 2 !== 0) return;
+    const item = progression[idx];
+    if (!item || beatsOf(item) !== num) return;
+    const off = columnOffset(progression, idx);
+    const half = num / 2;
+    setProgression((prev) => prev.flatMap((x, i) => {
+      if (i !== idx) return [x];
+      const head = typeof x === 'number' ? { deg: x, beats: half } : { ...x, beats: half };
+      return [head, { deg: 0, beats: half }]; // 後半預設放 C
+    }));
     setMelody((prev) => {
       const next = [...prev];
-      next.splice(off, len);
+      next.splice(off + half, 0, ...Array(half).fill(null));
       return next;
     });
   }
 
-  // 把某個和弦切成半小節（或還原成整小節），一個小節就能放兩個和弦
-  function toggleHalf(idx) {
-    const num = tsDef(timeSig).num;
-    if (num % 2 !== 0) return; // 3/4 等奇數拍無法對半
-    const item = progression[idx];
-    if (!item) return;
-    const cur = beatsOf(item);
-    const next = cur === num ? num / 2 : num;
-    const off = columnOffset(progression, idx);
-    setProgression((prev) => prev.map((x, i) => (i === idx ? (typeof x === 'number' ? { deg: x, beats: next } : { ...x, beats: next }) : x)));
-    setMelody((prev) => {
-      const nextMelody = [...prev];
-      if (next > cur) nextMelody.splice(off + cur, 0, ...Array(next - cur).fill(null));
-      else nextMelody.splice(off + next, cur - next);
-      return nextMelody;
-    });
+  // 把某個和弦改成別的和弦
+  function replaceChord(idx, deg) {
+    setProgression((prev) => prev.map((x, i) => (i === idx ? { deg, beats: beatsOf(x) } : x)));
   }
 
   function changeTimeSig(nextSig) {
@@ -984,7 +1029,8 @@ export default function App() {
             removeFromProgression={removeFromProgression}
             timeSig={timeSig}
             changeTimeSig={changeTimeSig}
-            toggleHalf={toggleHalf}
+            insertSecondHalf={insertSecondHalf}
+            replaceChord={replaceChord}
             moveChord={moveChord}
             loadPreset={loadPreset}
             playAll={playAll}
@@ -1878,7 +1924,7 @@ function ChordPicker({ onPick }) {
 
 function ChordsPage({
   progression, playChord, addToProgression,
-  removeFromProgression, timeSig, changeTimeSig, toggleHalf, moveChord,
+  removeFromProgression, timeSig, changeTimeSig, insertSecondHalf, replaceChord, moveChord,
   loadPreset, playAll, isPlaying, done, toggleDone, onSave, savedMsg,
   onExportMidi, onCopyChords, copiedMsg,
 }) {
@@ -2090,10 +2136,12 @@ function ChordsPage({
           <>
           <div className="flex flex-wrap gap-2 mb-5">
             {progression.map((item, i) => {
-              const isWarm = chordOf(item).tone === 'warm';
-              const isCool = chordOf(item).tone === 'cool';
+              const def = chordOf(item);
+              const isWarm = def.tone === 'warm';
+              const isCool = def.tone === 'cool';
               const beats = beatsOf(item);
               const isHalf = beats < beatsPerBar;
+              const selValue = typeof item === 'number' ? item : (item.deg != null ? item.deg : -1);
               // 小節編號：依累積拍數算，半小節會跟前一個和弦同小節
               const measureNo = Math.floor(columnOffset(progression, i) / beatsPerBar) + 1;
               const startsMeasure = columnOffset(progression, i) % beatsPerBar === 0;
@@ -2115,20 +2163,30 @@ function ChordsPage({
                   <span className="text-[10px] text-[#6B7285] leading-none">
                     {startsMeasure ? measureNo : `${measureNo}·`}
                   </span>
-                  <span className={`font-medium ${isWarm ? 'text-[#E8A33D]' : isCool ? 'text-[#6FA8DC]' : 'text-[#A9AFC3]'}`}>
-                    {chordSymbol(item)}
-                  </span>
-                  {canHalf && (
+                  <select
+                    value={selValue}
+                    onChange={(e) => {
+                      const v = Number(e.target.value);
+                      if (v >= 0) replaceChord(i, v);
+                    }}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    className={`bg-transparent font-medium cursor-pointer outline-none border border-transparent rounded px-0.5 focus:border-[#E8A33D] ${
+                      isWarm ? 'text-[#E8A33D]' : isCool ? 'text-[#6FA8DC]' : 'text-[#A9AFC3]'
+                    }`}
+                    title="點一下換和弦"
+                  >
+                    {selValue === -1 && <option value={-1}>{def.sym}</option>}
+                    {CHORDS.map((c, j) => (
+                      <option key={c.sym} value={j} className="text-[#F2EFE9] bg-[#1F2430]">{c.sym}</option>
+                    ))}
+                  </select>
+                  {canHalf && !isHalf && (
                     <button
-                      onClick={(e) => { e.stopPropagation(); toggleHalf(i); }}
-                      title={isHalf ? '還原成整小節' : '切成半小節（一個小節放兩個和弦）'}
-                      className={`text-[10px] border rounded px-1 leading-none py-0.5 transition-colors ${
-                        isHalf
-                          ? 'border-[#E8A33D] text-[#E8A33D]'
-                          : 'border-[#333B52] text-[#6B7285] hover:text-[#A9AFC3] hover:border-[#A9AFC3]'
-                      }`}
+                      onClick={(e) => { e.stopPropagation(); insertSecondHalf(i); }}
+                      title="在這個小節的後半插入第二個和弦"
+                      className="text-[10px] border border-[#333B52] rounded px-1 leading-none py-0.5 text-[#6B7285] hover:text-[#E8A33D] hover:border-[#E8A33D] transition-colors"
                     >
-                      ½
+                      ＋
                     </button>
                   )}
                   <button onClick={() => removeFromProgression(i)} className="text-[#A9AFC3] hover:text-[#E1685B]">
@@ -2140,8 +2198,8 @@ function ChordsPage({
           </div>
           {canHalf && (
             <p className="text-xs text-[#A9AFC3] -mt-3 mb-4">
-              按 <span className="text-[#E8A33D] border border-[#333B52] rounded px-1 text-[10px]">½</span> 可把和弦切成半小節，
-              兩個半小節就會合成一個小節（例如第二小節放兩個和弦）；再按一次還原。
+              按 <span className="text-[#E8A33D] border border-[#333B52] rounded px-1 text-[10px]">＋</span> 可在這個小節的後半插入第二個和弦；
+              點和弦名稱可以換成別的和弦。這樣一個小節就有兩個和弦了。
             </p>
           )}
           </>
