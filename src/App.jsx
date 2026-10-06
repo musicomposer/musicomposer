@@ -837,43 +837,52 @@ export default function App() {
     return { list: out, melody: outMel };
   }
 
-  // 按「＋」或把和弦拖進「＋」：這個小節補上後半，湊成完整一小節
-  function insertSecondHalf(idx, chord) {
-    const num = tsDef(timeSig).num;
-    if (num % 2 !== 0) return;
+  // 在 list/mel 的第 idx 個和弦後面補一個半小節（整和弦先切成兩半）；純函式，方便「移動」也共用
+  function addSecondHalf(list, mel, idx, chord, num) {
+    if (num % 2 !== 0 || !list[idx]) return { list, melody: mel };
     const half = num / 2;
-    const item = progression[idx];
-    if (!item) return;
+    const item = list[idx];
     const b = beatsOf(item);
-    const off = columnOffset(progression, idx);
+    const off = columnOffset(list, idx);
     const entry = chord == null
       ? { deg: 0, beats: half } // 沒指定就放 C
       : (typeof chord === 'number' ? { deg: chord, beats: half } : { ...chord, beats: half });
+    const nextList = [...list];
+    const nextMel = [...mel];
     if (b === num) {
-      // 整小節 → 切成兩半，後半放指定和弦
-      setProgression((prev) => prev.flatMap((x, i) => {
-        if (i !== idx) return [x];
-        const head = typeof x === 'number' ? { deg: x, beats: half } : { ...x, beats: half };
-        return [head, entry];
-      }));
-      setMelody((prev) => {
-        const next = [...prev];
-        next.splice(off + half, 0, ...Array(half).fill(null));
-        return next;
-      });
+      nextList[idx] = typeof item === 'number' ? { deg: item, beats: half } : { ...item, beats: half };
+      nextList.splice(idx + 1, 0, entry);
+      nextMel.splice(off + half, 0, ...Array(half).fill(null));
     } else {
-      // 已經是半小節（缺後半）→ 直接補在它後面
-      setProgression((prev) => {
-        const next = [...prev];
-        next.splice(idx + 1, 0, entry);
-        return next;
-      });
-      setMelody((prev) => {
-        const next = [...prev];
-        next.splice(off + b, 0, ...Array(half).fill(null));
-        return next;
-      });
+      nextList.splice(idx + 1, 0, entry);
+      nextMel.splice(off + b, 0, ...Array(half).fill(null));
     }
+    return { list: nextList, melody: nextMel };
+  }
+
+  // 按「＋」或把和弦拖進「＋」：這個小節補上後半，湊成完整一小節
+  function insertSecondHalf(idx, chord) {
+    const res = addSecondHalf(progression, melody, idx, chord, tsDef(timeSig).num);
+    setProgression(res.list);
+    setMelody(res.melody);
+  }
+
+  // 把已加入進行的第 from 個和弦，搬到第 toIdx 個和弦所在小節的後半
+  function moveChordIntoSecondHalf(from, toIdx) {
+    const num = tsDef(timeSig).num;
+    if (num % 2 !== 0 || from === toIdx || from < 0 || toIdx < 0) return;
+    // 先把來源和弦（含它的旋律）移除
+    const off = columnOffset(progression, from);
+    const len = beatsOf(progression[from]);
+    const moved = progression[from];
+    const list1 = progression.filter((_, i) => i !== from);
+    const mel1 = [...melody];
+    mel1.splice(off, len);
+    const target = from < toIdx ? toIdx - 1 : toIdx; // 移除後索引位移
+    const res = addSecondHalf(list1, mel1, target, moved, num);
+    const repaired = repairHalves(res.list, res.melody);
+    setProgression(repaired.list);
+    setMelody(repaired.melody);
   }
 
   // 把和弦插到第 idx 個位置前（從上面拖下來）
@@ -1087,6 +1096,7 @@ export default function App() {
             insertSecondHalf={insertSecondHalf}
             insertChordAt={insertChordAt}
             moveChord={moveChord}
+            moveChordIntoSecondHalf={moveChordIntoSecondHalf}
             loadPreset={loadPreset}
             playAll={playAll}
             isPlaying={isPlaying}
@@ -1911,7 +1921,7 @@ function GeneralLyricsContent({ rhymeOn, setRhymeOn }) {
 /* 第三排：下拉選單選和弦（根音 + 升降記號 + 性質）                      */
 /* ---------------------------------------------------------------- */
 
-function ChordPicker({ onPick }) {
+function ChordPicker({ onPick, onDragChord, onDragChordEnd }) {
   const [rootIdx, setRootIdx] = useState(0);
   const [accIdx, setAccIdx] = useState(0);
   const [qualIdx, setQualIdx] = useState(0);
@@ -1953,7 +1963,19 @@ function ChordPicker({ onPick }) {
           ))}
         </select>
 
-        <span className="font-serif text-lg ml-1 min-w-[4.5rem] text-[#F2EFE9]">{sym}</span>
+        <span
+          draggable
+          onDragStart={(e) => {
+            e.dataTransfer.setData('text/plain', sym);
+            e.dataTransfer.effectAllowed = 'copy';
+            onDragChord && onDragChord(chord);
+          }}
+          onDragEnd={() => onDragChordEnd && onDragChordEnd()}
+          title="把這個和弦拖到小節的 ＋ 或小節框裡"
+          className="font-serif text-lg ml-1 min-w-[4.5rem] text-[#F2EFE9] cursor-grab active:cursor-grabbing border border-dashed border-transparent hover:border-[#E8A33D] rounded px-1"
+        >
+          {sym}
+        </span>
 
         <button
           onClick={() => onPick(chord, 'play')}
@@ -1979,7 +2001,7 @@ function ChordPicker({ onPick }) {
 
 function ChordsPage({
   progression, playChord, addToProgression,
-  removeFromProgression, timeSig, changeTimeSig, insertSecondHalf, insertChordAt, moveChord,
+  removeFromProgression, timeSig, changeTimeSig, insertSecondHalf, insertChordAt, moveChord, moveChordIntoSecondHalf,
   loadPreset, playAll, isPlaying, done, toggleDone, onSave, savedMsg,
   onExportMidi, onCopyChords, copiedMsg,
 }) {
@@ -2062,7 +2084,11 @@ function ChordsPage({
                   <button
                     key={c.sym}
                     draggable
-                    onDragStart={() => setDragChord(d)}
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData('text/plain', c.sym);
+                      e.dataTransfer.effectAllowed = 'copy';
+                      setDragChord(d);
+                    }}
                     onDragEnd={() => setDragChord(null)}
                     onClick={() => {
                       playChord(d);
@@ -2092,6 +2118,8 @@ function ChordsPage({
               playChord(chord); // 加入時也響一聲當作回饋
             }
           }}
+          onDragChord={setDragChord}
+          onDragChordEnd={() => setDragChord(null)}
         />
       </Panel>
 
@@ -2242,13 +2270,14 @@ function ChordsPage({
                       if (canAdd) insertSecondHalf(lastIdx, dragChord);
                       else insertChordAt(lastIdx + 1, dragChord);
                     } else if (dragIdx != null) {
-                      moveChord(dragIdx, firstIdx);
+                      if (canAdd) moveChordIntoSecondHalf(dragIdx, lastIdx); // 搬進這個小節的後半
+                      else moveChord(dragIdx, firstIdx);
                     }
                     setDragIdx(null);
                     setDragChord(null);
                   }}
                   className={`flex items-stretch bg-[#1F2430] border rounded-md overflow-hidden transition-colors ${
-                    dragChord != null && canAdd
+                    (dragChord != null || dragIdx != null) && canAdd
                       ? 'border-dashed border-[#E8A33D]'
                       : 'border-[#333B52]'
                   }`}
@@ -2267,7 +2296,11 @@ function ChordsPage({
                         <span
                           key={i}
                           draggable
-                          onDragStart={() => setDragIdx(i)}
+                          onDragStart={(e) => {
+                            e.dataTransfer.setData('text/plain', chordOf(item).sym);
+                            e.dataTransfer.effectAllowed = 'move';
+                            setDragIdx(i);
+                          }}
                           onDragOver={(e) => e.preventDefault()}
                           onDrop={(e) => {
                             e.stopPropagation();
@@ -2292,13 +2325,14 @@ function ChordsPage({
                               onDragOver={(e) => e.preventDefault()}
                               onDrop={(e) => {
                                 e.stopPropagation();
-                                if (dragChord != null) insertSecondHalf(i, dragChord);
+                                if (dragChord != null) insertSecondHalf(i, dragChord);   // 從上面和弦區拖進來
+                                else if (dragIdx != null) moveChordIntoSecondHalf(dragIdx, i); // 把已加入的和弦搬進後半
                                 setDragChord(null);
                                 setDragIdx(null);
                               }}
                               title="把和弦拖進來，放進這個小節的後半"
                               className={`text-[10px] border rounded px-1 leading-none py-0.5 transition-colors ${
-                                dragChord != null
+                                dragChord != null || dragIdx != null
                                   ? 'border-[#E8A33D] text-[#E8A33D] bg-[#E8A33D]/10'
                                   : 'border-[#333B52] text-[#6B7285] hover:text-[#E8A33D] hover:border-[#E8A33D]'
                               }`}
@@ -2319,8 +2353,10 @@ function ChordsPage({
           </div>
           {canHalf && (
             <p className="text-xs text-[#A9AFC3] -mt-3 mb-4">
-              左邊數字是小節編號；把上面的和弦<span className="text-[#E8A33D]">拖進 ＋ 或小節框裡</span>，
-              就能放進那個小節的後半，一個小節放兩個和弦。也可以拖到和弦上插隊、拖到空白處加到最後。
+              左邊數字是小節編號。每個小節都可以再放第二個和弦：
+              <span className="text-[#E8A33D]">把上面的和弦（或第三排自己配的和弦）拖進 ＋</span>，
+              或把<span className="text-[#E8A33D]">已加入進行的和弦直接拖進 ＋</span>（會整個搬過去）；
+              也可以拖到和弦上插隊、拖到空白處加到最後。按 ＋ 則是先放一個 C 當後半。
             </p>
           )}
           </>
