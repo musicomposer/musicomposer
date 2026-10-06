@@ -977,8 +977,10 @@ export default function App() {
     const items = [...progression];
     const [item] = items.splice(from, 1);
     const [seg] = segs.splice(from, 1);
-    items.splice(to, 0, item);
-    segs.splice(to, 0, seg);
+    // 移除來源後索引會位移：要插在目標「前面」
+    const at = Math.max(0, from < to ? to - 1 : to);
+    items.splice(at, 0, item);
+    segs.splice(at, 0, seg);
     const repaired = repairHalves(items, segs.flat()); // 保持半小節兩兩成對
     setProgression(repaired.list);
     setMelody(repaired.melody);
@@ -2298,8 +2300,17 @@ function ChordsPage({
             onDragOver={(e) => e.preventDefault()}
             onDrop={(e) => {
               e.stopPropagation();
-              if (dragChord != null) insertChordAt(progression.length, dragChord); // 放到最後
-              else if (dragIdx != null) moveChord(dragIdx, progression.length - 1);
+              const lastM = measures[measures.length - 1];
+              const lastIdx = lastM ? lastM.chords[lastM.chords.length - 1].i : -1;
+              const lastCanAdd = lastM && canHalf && lastM.chords.length < 2;
+              if (dragChord != null) {
+                // 最後一個小節還有空位就補進後半，否則加到最後
+                if (lastCanAdd) insertSecondHalf(lastIdx, dragChord);
+                else insertChordAt(progression.length, dragChord);
+              } else if (dragIdx != null) {
+                if (lastCanAdd && dragIdx !== lastIdx) moveChordIntoSecondHalf(dragIdx, lastIdx);
+                else moveChord(dragIdx, progression.length - 1);
+              }
               setDragIdx(null);
               setDragChord(null);
             }}
@@ -2403,10 +2414,11 @@ function ChordsPage({
           </div>
           {canHalf && (
             <p className="text-xs text-[#A9AFC3] -mt-3 mb-4">
-              左邊數字是小節編號。每個小節都可以再放第二個和弦：
-              <span className="text-[#E8A33D]">把上面的和弦（或第三排自己配的和弦）拖進 ＋</span>，
-              或把<span className="text-[#E8A33D]">已加入進行的和弦直接拖進 ＋</span>（會整個搬過去）；
-              也可以拖到和弦上插隊、拖到空白處加到最後。按 ＋ 則是先放一個 C 當後半。
+              左邊數字是小節編號。每個小節都可以放兩個和弦：
+              <span className="text-[#E8A33D]">把上面的和弦（或第三排自己配的和弦）拖進 ＋</span>、
+              或把<span className="text-[#E8A33D]">已加入的和弦拖進 ＋／小節框</span>當後半；
+              第二個和弦也<span className="text-[#E8A33D]">可以再拖出去</span>放到別的小節、插隊或拉到最旁邊，
+              兩邊的小節會自動補滿，不會留下半拍空位（隨時可以 Ctrl + Z 復原）。
             </p>
           )}
           </>
