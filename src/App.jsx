@@ -2119,63 +2119,6 @@ function ChordsPage({
       )}
 
       <Panel className="mb-6">
-        <p className="text-sm text-[#A9AFC3] mb-3">C 大調的常用和弦（點一下試聽並加入進行）</p>
-
-        {[
-          { label: null, from: 0, to: 7 },
-          { label: '七和弦（加一個音，色彩更豐富）', from: 7, to: 14 },
-        ].map((row, rowIdx) => (
-          <div key={row.label || 'triad'} className={rowIdx > 0 ? 'mt-6' : ''}>
-            {row.label && <p className="text-sm text-[#A9AFC3] mb-3">{row.label}</p>}
-            <div className="grid grid-cols-4 sm:grid-cols-7 gap-2">
-              {CHORDS.slice(row.from, row.to).map((c, j) => {
-                const d = row.from + j;
-                const isWarm = c.tone === 'warm';
-                const isCool = c.tone === 'cool';
-                return (
-                  <button
-                    key={c.sym}
-                    draggable
-                    onDragStart={(e) => {
-                      e.dataTransfer.setData('text/plain', c.sym);
-                      e.dataTransfer.effectAllowed = 'copy';
-                      setDragChord(d);
-                    }}
-                    onDragEnd={() => setDragChord(null)}
-                    onClick={() => {
-                      playChord(d);
-                      addToProgression(d);
-                    }}
-                    className={`flex flex-col items-center gap-1 border border-[#333B52] rounded-md py-3 transition-colors cursor-grab active:cursor-grabbing ${
-                      c.rare ? 'opacity-50 hover:opacity-100' : ''
-                    } ${isWarm ? 'hover:border-[#E8A33D]' : isCool ? 'hover:border-[#6FA8DC]' : 'hover:border-[#A9AFC3]'}`}
-                  >
-                    <span className={`font-serif ${rowIdx === 0 ? 'text-lg' : 'text-base'} ${isWarm ? 'text-[#E8A33D]' : isCool ? 'text-[#6FA8DC]' : 'text-[#A9AFC3]'}`}>
-                      {c.sym}
-                    </span>
-                    <span className="text-[11px] text-[#A9AFC3] text-center leading-tight">{c.q}</span>
-                    {c.rare && <span className="text-[10px] text-[#6B7285]">較少用</span>}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        ))}
-
-        <ChordPicker
-          onPick={(chord, action) => {
-            if (action === 'play') playChord(chord);
-            else {
-              addToProgression(chord);
-              playChord(chord); // 加入時也響一聲當作回饋
-            }
-          }}
-          onDragChord={setDragChord}
-          onDragChordEnd={() => setDragChord(null)}
-        />
-      </Panel>
-
-      <Panel className="mb-6">
         <div className="flex items-center justify-between mb-3">
           <p className="text-sm text-[#A9AFC3]">教學進行（點一下直接套用）</p>
         </div>
@@ -2257,6 +2200,63 @@ function ChordsPage({
             <ExternalLink size={14} /> 影片：樂理篇 08（不是 4536，是哪組進行？）
           </a>
         </div>
+      </Panel>
+
+      <Panel className="mb-6">
+        <p className="text-sm text-[#A9AFC3] mb-3">C 大調的常用和弦（點一下試聽並加入進行）</p>
+
+        {[
+          { label: null, from: 0, to: 7 },
+          { label: '七和弦（加一個音，色彩更豐富）', from: 7, to: 14 },
+        ].map((row, rowIdx) => (
+          <div key={row.label || 'triad'} className={rowIdx > 0 ? 'mt-6' : ''}>
+            {row.label && <p className="text-sm text-[#A9AFC3] mb-3">{row.label}</p>}
+            <div className="grid grid-cols-4 sm:grid-cols-7 gap-2">
+              {CHORDS.slice(row.from, row.to).map((c, j) => {
+                const d = row.from + j;
+                const isWarm = c.tone === 'warm';
+                const isCool = c.tone === 'cool';
+                return (
+                  <button
+                    key={c.sym}
+                    draggable
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData('text/plain', c.sym);
+                      e.dataTransfer.effectAllowed = 'copy';
+                      setDragChord(d);
+                    }}
+                    onDragEnd={() => setDragChord(null)}
+                    onClick={() => {
+                      playChord(d);
+                      addToProgression(d);
+                    }}
+                    className={`flex flex-col items-center gap-1 border border-[#333B52] rounded-md py-3 transition-colors cursor-grab active:cursor-grabbing ${
+                      c.rare ? 'opacity-50 hover:opacity-100' : ''
+                    } ${isWarm ? 'hover:border-[#E8A33D]' : isCool ? 'hover:border-[#6FA8DC]' : 'hover:border-[#A9AFC3]'}`}
+                  >
+                    <span className={`font-serif ${rowIdx === 0 ? 'text-lg' : 'text-base'} ${isWarm ? 'text-[#E8A33D]' : isCool ? 'text-[#6FA8DC]' : 'text-[#A9AFC3]'}`}>
+                      {c.sym}
+                    </span>
+                    <span className="text-[11px] text-[#A9AFC3] text-center leading-tight">{c.q}</span>
+                    {c.rare && <span className="text-[10px] text-[#6B7285]">較少用</span>}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+
+        <ChordPicker
+          onPick={(chord, action) => {
+            if (action === 'play') playChord(chord);
+            else {
+              addToProgression(chord);
+              playChord(chord); // 加入時也響一聲當作回饋
+            }
+          }}
+          onDragChord={setDragChord}
+          onDragChordEnd={() => setDragChord(null)}
+        />
       </Panel>
 
       <Panel>
