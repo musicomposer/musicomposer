@@ -2261,7 +2261,7 @@ function ChordsPage({
 
       <Panel>
         <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
-          <p className="text-sm text-[#A9AFC3]">我的和弦進行（一個和弦 = 一個小節，可拖曳調整順序）</p>
+          <p className="text-sm text-[#A9AFC3]">我的和弦進行</p>
           <div className="flex items-center gap-2">
             <label htmlFor="time-sig" className="text-xs text-[#A9AFC3]">拍號</label>
             <select
