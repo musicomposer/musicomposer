@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import * as Tone from 'tone';
-import { Music, ListMusic, PenLine, Guitar, Waves, Play, Save, Check, X, Download, LogOut, ExternalLink, Headphones, Copy } from 'lucide-react';
+import { Music, ListMusic, PenLine, Guitar, Waves, Play, Save, Check, X, Download, LogOut, ExternalLink, Headphones, Copy, Undo2 } from 'lucide-react';
 import { auth, googleProvider, db } from './firebase';
 import { onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth';
 import { doc, getDoc, setDoc, collection, getDocs } from 'firebase/firestore';
@@ -624,6 +624,43 @@ export default function App() {
   const pianoReadyRef = useRef(false);
   const loadedRef = useRef(false);
 
+  // 復原上一步：每次動作前存一份「進行＋旋律＋拍號」快照
+  const historyRef = useRef([]);
+  const [canUndo, setCanUndo] = useState(false);
+
+  function recordHistory() {
+    const snap = JSON.stringify({ progression, melody, timeSig });
+    const last = historyRef.current[historyRef.current.length - 1];
+    if (last === snap) return; // 同一次動作不重複記錄
+    historyRef.current.push(snap);
+    if (historyRef.current.length > 60) historyRef.current.shift();
+    setCanUndo(true);
+  }
+
+  function undo() {
+    const snap = historyRef.current.pop();
+    if (!snap) return;
+    const prev = JSON.parse(snap);
+    setProgression(prev.progression);
+    setMelody(prev.melody);
+    setTimeSig(prev.timeSig);
+    setCanUndo(historyRef.current.length > 0);
+  }
+
+  // 鍵盤 Ctrl / Cmd + Z 也能復原
+  useEffect(() => {
+    function onKey(e) {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
+        const tag = (e.target && e.target.tagName) || '';
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+        e.preventDefault();
+        undo();
+      }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
+
   const rootMidi = 60; // 固定 C 大調
 
   // 監聽登入狀態
@@ -759,6 +796,7 @@ export default function App() {
   }
 
   function addToProgression(chord) {
+    recordHistory();
     // chord 可以是和弦索引（數字），也可以是下拉選單產生的自訂和弦定義
     // 如果最後一個小節還缺後半（剩半小節），就補進那個小節，而不是多開一個小節
     const num = tsDef(timeSig).num;
@@ -775,6 +813,7 @@ export default function App() {
   }
 
   function removeFromProgression(idx) {
+    recordHistory();
     const off = columnOffset(progression, idx);
     const len = beatsOf(progression[idx]);
     const nextList = progression.filter((_, i) => i !== idx);
@@ -862,6 +901,7 @@ export default function App() {
 
   // 按「＋」或把和弦拖進「＋」：這個小節補上後半，湊成完整一小節
   function insertSecondHalf(idx, chord) {
+    recordHistory();
     const res = addSecondHalf(progression, melody, idx, chord, tsDef(timeSig).num);
     setProgression(res.list);
     setMelody(res.melody);
@@ -869,6 +909,7 @@ export default function App() {
 
   // 把已加入進行的第 from 個和弦，搬到第 toIdx 個和弦所在小節的後半
   function moveChordIntoSecondHalf(from, toIdx) {
+    recordHistory();
     const num = tsDef(timeSig).num;
     if (num % 2 !== 0 || from === toIdx || from < 0 || toIdx < 0) return;
     // 先把來源和弦（含它的旋律）移除
@@ -887,6 +928,7 @@ export default function App() {
 
   // 把和弦插到第 idx 個位置前（從上面拖下來）
   function insertChordAt(idx, chord) {
+    recordHistory();
     const beats = tsDef(timeSig).num;
     const entry = typeof chord === 'number' ? { deg: chord, beats } : { ...chord, beats };
     const list = [...progression];
@@ -900,6 +942,7 @@ export default function App() {
 
   function changeTimeSig(nextSig) {
     if (!tsDef(nextSig) || nextSig === timeSig) return;
+    recordHistory();
     const num = tsDef(nextSig).num;
     setTimeSig(nextSig);
     // 每個和弦固定一個小節：重設拍數，並把旋律每段調整成新的格數
@@ -920,6 +963,7 @@ export default function App() {
 
   function moveChord(from, to) {
     if (from === to || from < 0 || to < 0 || from >= progression.length || to >= progression.length) return;
+    recordHistory();
     // 把旋律切成「每格和弦一段」，跟和弦一起搬家
     const segs = [];
     let off = 0;
@@ -941,6 +985,7 @@ export default function App() {
   }
 
   function loadPreset(preset) {
+    recordHistory();
     const beats = tsDef(timeSig).num;
     setProgression(preset.degrees.map((d) => ({ deg: d, beats })));
     setMelody(Array(preset.degrees.length * beats).fill(null));
@@ -960,6 +1005,7 @@ export default function App() {
   }
 
   function toggleMelodyCell(col, extDeg) {
+    recordHistory();
     setMelody((prev) => {
       const next = [...prev];
       next[col] = next[col] === extDeg ? null : extDeg;
@@ -1097,6 +1143,8 @@ export default function App() {
             insertChordAt={insertChordAt}
             moveChord={moveChord}
             moveChordIntoSecondHalf={moveChordIntoSecondHalf}
+            onUndo={undo}
+            canUndo={canUndo}
             loadPreset={loadPreset}
             playAll={playAll}
             isPlaying={isPlaying}
@@ -1125,6 +1173,8 @@ export default function App() {
             onSave={() => persist({})}
             savedMsg={savedMsg}
             onExportMidi={() => downloadMidi(rootMidi, progression, melody, timeSig)}
+            onUndo={undo}
+            canUndo={canUndo}
           />
         )}
 
@@ -2003,7 +2053,7 @@ function ChordsPage({
   progression, playChord, addToProgression,
   removeFromProgression, timeSig, changeTimeSig, insertSecondHalf, insertChordAt, moveChord, moveChordIntoSecondHalf,
   loadPreset, playAll, isPlaying, done, toggleDone, onSave, savedMsg,
-  onExportMidi, onCopyChords, copiedMsg,
+  onExportMidi, onCopyChords, copiedMsg, onUndo, canUndo,
 }) {
   const [zoomImg, setZoomImg] = useState(null);
   const [dragIdx, setDragIdx] = useState(null);        // 進行中和弦的拖曳來源
@@ -2370,6 +2420,14 @@ function ChordsPage({
             <Play size={15} /> 播放進行
           </button>
           <button
+            onClick={onUndo}
+            disabled={!canUndo}
+            title="復原上一個動作"
+            className="inline-flex items-center gap-2 border border-[#333B52] rounded-md px-4 py-2 text-sm text-[#A9AFC3] hover:text-[#F2EFE9] hover:border-[#E8A33D] disabled:opacity-40"
+          >
+            <Undo2 size={15} /> 復原上一步
+          </button>
+          <button
             onClick={onSave}
             className="inline-flex items-center gap-2 border border-[#333B52] rounded-md px-4 py-2 text-sm text-[#A9AFC3] hover:text-[#F2EFE9]"
           >
@@ -2404,7 +2462,7 @@ function ChordsPage({
 
 function MelodyPage({
   progression, melody, timeSig, toggleMelodyCell, playAll, isPlaying, playheadCol,
-  goToChords, done, toggleDone, onSave, savedMsg, onExportMidi,
+  goToChords, done, toggleDone, onSave, savedMsg, onExportMidi, onUndo, canUndo,
 }) {
   const rows = [7, 6, 5, 4, 3, 2, 1, 0]; // extended degrees, high to low
 
@@ -2512,6 +2570,14 @@ function MelodyPage({
               className="inline-flex items-center gap-2 border border-[#333B52] rounded-md px-4 py-2 text-sm text-[#A9AFC3] hover:text-[#F2EFE9]"
             >
               <Save size={15} /> 儲存旋律
+            </button>
+            <button
+              onClick={onUndo}
+              disabled={!canUndo}
+              title="復原上一個動作"
+              className="inline-flex items-center gap-2 border border-[#333B52] rounded-md px-4 py-2 text-sm text-[#A9AFC3] hover:text-[#F2EFE9] hover:border-[#E8A33D] disabled:opacity-40"
+            >
+              <Undo2 size={15} /> 復原上一步
             </button>
             <button
               onClick={onExportMidi}
