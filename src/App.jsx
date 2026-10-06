@@ -1988,7 +1988,6 @@ function ChordsPage({
   const [dragChord, setDragChord] = useState(null);    // 上方和弦按鈕的拖曳來源（度數）
   const beatsPerBar = tsDef(timeSig).num;
   const canHalf = beatsPerBar % 2 === 0;
-  const halfBeats = beatsPerBar / 2;
 
   // 依小節分組：同一小節的和弦包在同一個框裡（框左邊是小節編號）
   const measures = [];
@@ -2001,7 +2000,6 @@ function ChordsPage({
     m.chords.push({ item, i, second: m.chords.length > 0 });
     m.filled += beatsOf(item);
   });
-  measures.forEach((m) => { m.remaining = beatsPerBar - m.filled; });
   return (
     <div>
       <div className="flex items-center justify-between gap-4 mb-1">
@@ -2231,7 +2229,8 @@ function ChordsPage({
             {measures.map((m) => {
               const firstIdx = m.chords[0].i;
               const lastIdx = m.chords[m.chords.length - 1].i;
-              const canAdd = canHalf && m.remaining === halfBeats; // 這個小節還缺後半
+              // 只要這個小節還只有 1 個和弦，就能再放第二個（整的會切兩半、半的補後半）
+              const canAdd = canHalf && m.chords.length < 2;
               return (
                 <div
                   key={m.no}
@@ -2249,13 +2248,11 @@ function ChordsPage({
                     setDragChord(null);
                   }}
                   className={`flex items-stretch bg-[#1F2430] border rounded-md overflow-hidden transition-colors ${
-                    dragChord != null
-                      ? 'border-dashed border-[#E8A33D]/70'
-                      : canAdd
-                        ? 'border-[#E8A33D]/50'
-                        : 'border-[#333B52]'
+                    dragChord != null && canAdd
+                      ? 'border-dashed border-[#E8A33D]'
+                      : 'border-[#333B52]'
                   }`}
-                  title={canAdd ? '這個小節還有一半，把和弦拖進來放進後半' : '拖曳可以換順序，或把上面的和弦拖進來'}
+                  title={canAdd ? '這個小節還可以放第二個和弦：按 ＋ 或把和弦拖進來' : '拖曳可以換順序，或把上面的和弦拖進來'}
                 >
                   <span className="flex items-center px-2 text-[10px] text-[#6B7285] bg-[#171B24] border-r border-[#333B52] leading-none">
                     {m.no}
