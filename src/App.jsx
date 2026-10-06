@@ -2412,15 +2412,6 @@ function ChordsPage({
               );
             })}
           </div>
-          {canHalf && (
-            <p className="text-xs text-[#A9AFC3] -mt-3 mb-4">
-              左邊數字是小節編號。每個小節都可以放兩個和弦：
-              <span className="text-[#E8A33D]">把上面的和弦（或第三排自己配的和弦）拖進 ＋</span>、
-              或把<span className="text-[#E8A33D]">已加入的和弦拖進 ＋／小節框</span>當後半；
-              第二個和弦也<span className="text-[#E8A33D]">可以再拖出去</span>放到別的小節、插隊或拉到最旁邊，
-              兩邊的小節會自動補滿，不會留下半拍空位（隨時可以 Ctrl + Z 復原）。
-            </p>
-          )}
           </>
         )}
         <div className="flex flex-wrap gap-3">
