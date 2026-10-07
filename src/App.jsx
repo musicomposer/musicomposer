@@ -1291,6 +1291,7 @@ export default function App() {
             changeTimeSig={changeTimeSig}
             insertSecondHalf={insertSecondHalf}
             insertChordAt={insertChordAt}
+            pullOutToNewMeasure={pullOutToNewMeasure}
             moveChord={moveChord}
             moveChordIntoSecondHalf={moveChordIntoSecondHalf}
             onUndo={undo}
@@ -2206,7 +2207,7 @@ function ChordPicker({ onPick, onDragChord, onDragChordEnd, onTouchChord }) {
 
 function ChordsPage({
   progression, playChord, addToProgression,
-  removeFromProgression, timeSig, changeTimeSig, insertSecondHalf, insertChordAt, moveChord, moveChordIntoSecondHalf,
+  removeFromProgression, timeSig, changeTimeSig, insertSecondHalf, insertChordAt, pullOutToNewMeasure, moveChord, moveChordIntoSecondHalf,
   loadPreset, playAll, restartPlay, isPlaying, isPaused, done, toggleDone, onSave, savedMsg,
   onExportMidi, onCopyChords, copiedMsg, onUndo, canUndo,
 }) {
