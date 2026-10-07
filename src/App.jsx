@@ -1020,18 +1020,23 @@ export default function App() {
   function pullOutToNewMeasure(from) {
     if (from < 0 || from >= progression.length) return;
     const num = tsDef(timeSig).num;
-    // 找出 from 所屬小節的範圍 [start, end]（原索引）
-    let filled = 0; let start = 0; let mStart = 0; let mEnd = -1;
-    progression.forEach((x, i) => {
+    // 找出 from 所屬小節的範圍 [startIdx, endIdx]（原索引）
+    let filled = 0; let mStart = 0; let startIdx = -1; let endIdx = -1;
+    for (let i = 0; i < progression.length; i += 1) {
       if (filled === 0) mStart = i;
-      filled += beatsOf(x);
+      filled += beatsOf(progression[i]);
       if (filled >= num) {
         filled = 0;
-        if (from >= mStart && from <= i) { start = mStart; mEnd = i; }
+        if (from >= mStart && from <= i) { startIdx = mStart; endIdx = i; }
       }
-    });
-    if (mEnd < 0) mEnd = progression.length - 1; // 資料尾端沒滿一小節的保險
-    if (mStart === mEnd) return; // 這個小節只有它一個 → 本來就已獨立
+    }
+    if (startIdx < 0) { // 資料尾端沒滿一小節的保險
+      startIdx = mStart;
+      endIdx = progression.length - 1;
+    }
+    const alone = startIdx === endIdx;           // 這個小節只有它一個
+    const isLast = endIdx === progression.length - 1;
+    if (alone && isLast) return;                 // 已經是最後一個獨立小節 → 沒東西可拉
 
     recordHistory();
     const off = columnOffset(progression, from);
@@ -1041,8 +1046,9 @@ export default function App() {
     const list = progression.filter((_, i) => i !== from);
     const mel = [...melody];
     mel.splice(off, len);
-    // 插入位置：原本這一小節最後一個和弦（mEnd）的後面；移除 from 後索引左移一位
-    const at = mEnd;
+    // 插入位置：跟別顆共用小節 → 緊接在原小節後面；
+    // 本來就自己一格 → 移到最後（＝拖到最右邊「＋ 新小節」的效果）
+    const at = alone ? list.length : endIdx;
     // 拉出來的和弦固定佔一整個小節
     const entry = typeof item === 'number' ? { deg: item, beats: num } : { ...item, beats: num };
     const padded = [...seg];
