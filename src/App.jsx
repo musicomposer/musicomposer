@@ -1015,6 +1015,43 @@ export default function App() {
     setMelody(repaired.melody);
   }
 
+  // 把「進行中的第 from 個和弦」從它的小節拉出來，獨立放到最後，變成一個新的小節
+  //（例如 7 小節裡的 F 往右拖出去 → 原小節只剩 G、F 自己成第 8 小節）
+  function pullOutToNewMeasure(from) {
+    if (from < 0 || from >= progression.length) return;
+    const num = tsDef(timeSig).num;
+    // 變更前先判斷：如果它已經是「最後一個小節裡唯一的和弦」，就不用動
+    let filled = 0; let count = 0; let curMeasure = 0; let targetMeasure = 0; let lastMeasure = 0;
+    progression.forEach((x, i) => {
+      if (filled === 0) { curMeasure += 1; count = 0; }
+      if (i === from) targetMeasure = curMeasure;
+      count += 1;
+      filled += beatsOf(x);
+      if (filled >= num) filled = 0;
+      lastMeasure = curMeasure;
+    });
+    const alone = targetMeasure === lastMeasure && count === 1;
+    if (alone) return; // 已經獨立成最後一小節
+
+    recordHistory();
+    const off = columnOffset(progression, from);
+    const len = beatsOf(progression[from]);
+    const item = progression[from];
+    const seg = melody.slice(off, off + len);
+    const list = progression.filter((_, i) => i !== from);
+    const mel = [...melody];
+    mel.splice(off, len);
+    // 拉出來的和弦固定佔一整個小節
+    const entry = typeof item === 'number' ? { deg: item, beats: num } : { ...item, beats: num };
+    const padded = [...seg];
+    while (padded.length < num) padded.push(null);
+    list.push(entry);
+    mel.push(...padded.slice(0, num));
+    const repaired = repairHalves(list, mel); // 來源小節剩下的半小節會補回整小節
+    setProgression(repaired.list);
+    setMelody(repaired.melody);
+  }
+
   function loadPreset(preset) {
     recordHistory();
     const beats = tsDef(timeSig).num;
@@ -2295,11 +2332,20 @@ function ChordsPage({
       if (isChord) {
         if (lastCanAdd) insertSecondHalf(lastIdx, val);
         else insertChordAt(progression.length, val);
+      } else if (lastM && lastM.chords.some((c) => c.i === val)) {
+        // 本來就在最後一小節裡 → 往外拖＝拉出來獨立成新小節
+        pullOutToNewMeasure(val);
       } else if (lastCanAdd && val !== lastIdx) {
         moveChordIntoSecondHalf(val, lastIdx);
       } else {
         moveChord(val, progression.length - 1);
       }
+      return true;
+    }
+    if (head === 'newmeasure') {
+      // 拖到「＋ 新小節」：把它拉出來，獨立成最後一個新小節
+      if (isChord) insertChordAt(progression.length, val);
+      else pullOutToNewMeasure(val);
       return true;
     }
     if (head === 'measure') {
@@ -2678,6 +2724,20 @@ function ChordsPage({
                 </div>
               );
             })}
+            {/* 拖到這裡：把和弦拉出來，獨立成最後一個新小節 */}
+            <div
+              data-drop="newmeasure"
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={html5Drop}
+              title="把和弦拖進來，拉出來獨立成一個新小節"
+              className={`flex items-center justify-center min-w-[92px] px-4 rounded-md border border-dashed text-xs transition-colors ${
+                (dragChord != null || dragIdx != null) || touchKey === 'newmeasure'
+                  ? 'border-[#E8A33D] text-[#E8A33D] bg-[#E8A33D]/10'
+                  : 'border-[#333B52] text-[#6B7285] hover:border-[#E8A33D] hover:text-[#E8A33D]'
+              }`}
+            >
+              ＋ 新小節
+            </div>
           </div>
           </>
         )}
