@@ -1015,23 +1015,23 @@ export default function App() {
     setMelody(repaired.melody);
   }
 
-  // 把「進行中的第 from 個和弦」從它的小節拉出來，獨立放到最後，變成一個新的小節
-  //（例如 7 小節裡的 F 往右拖出去 → 原小節只剩 G、F 自己成第 8 小節）
+  // 把「進行中的第 from 個和弦」從它的小節拉出來，獨立成緊接在後的新小節
+  //（例如 7 小節裡的 F 往右拖出去 → 原小節只剩 G，F 自己成第 8 小節）
   function pullOutToNewMeasure(from) {
     if (from < 0 || from >= progression.length) return;
     const num = tsDef(timeSig).num;
-    // 變更前先判斷：如果它已經是「最後一個小節裡唯一的和弦」，就不用動
-    let filled = 0; let count = 0; let curMeasure = 0; let targetMeasure = 0; let lastMeasure = 0;
+    // 找出 from 所屬小節的範圍 [start, end]（原索引）
+    let filled = 0; let start = 0; let mStart = 0; let mEnd = -1;
     progression.forEach((x, i) => {
-      if (filled === 0) { curMeasure += 1; count = 0; }
-      if (i === from) targetMeasure = curMeasure;
-      count += 1;
+      if (filled === 0) mStart = i;
       filled += beatsOf(x);
-      if (filled >= num) filled = 0;
-      lastMeasure = curMeasure;
+      if (filled >= num) {
+        filled = 0;
+        if (from >= mStart && from <= i) { start = mStart; mEnd = i; }
+      }
     });
-    const alone = targetMeasure === lastMeasure && count === 1;
-    if (alone) return; // 已經獨立成最後一小節
+    if (mEnd < 0) mEnd = progression.length - 1; // 資料尾端沒滿一小節的保險
+    if (mStart === mEnd) return; // 這個小節只有它一個 → 本來就已獨立
 
     recordHistory();
     const off = columnOffset(progression, from);
@@ -1041,12 +1041,14 @@ export default function App() {
     const list = progression.filter((_, i) => i !== from);
     const mel = [...melody];
     mel.splice(off, len);
+    // 插入位置：原本這一小節最後一個和弦（mEnd）的後面；移除 from 後索引左移一位
+    const at = mEnd;
     // 拉出來的和弦固定佔一整個小節
     const entry = typeof item === 'number' ? { deg: item, beats: num } : { ...item, beats: num };
     const padded = [...seg];
     while (padded.length < num) padded.push(null);
-    list.push(entry);
-    mel.push(...padded.slice(0, num));
+    list.splice(at, 0, entry);
+    mel.splice(columnOffset(list, at), 0, ...padded.slice(0, num));
     const repaired = repairHalves(list, mel); // 來源小節剩下的半小節會補回整小節
     setProgression(repaired.list);
     setMelody(repaired.melody);
