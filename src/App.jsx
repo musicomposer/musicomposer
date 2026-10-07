@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import * as Tone from 'tone';
-import { Music, ListMusic, PenLine, Guitar, Waves, Play, Pause, Save, Check, X, Download, LogOut, ExternalLink, Headphones, Copy, Undo2 } from 'lucide-react';
+import { Music, ListMusic, PenLine, Guitar, Waves, Play, Pause, SkipBack, Save, Check, X, Download, LogOut, ExternalLink, Headphones, Copy, Undo2 } from 'lucide-react';
 import { auth, googleProvider, db } from './firebase';
 import { onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth';
 import { doc, getDoc, setDoc, collection, getDocs } from 'firebase/firestore';
@@ -1040,6 +1040,7 @@ export default function App() {
     if (!progression.length) return;
     ensureAudio().then(() => {
       const tr = transport();
+      releaseAllVoices(); // 從頭播：先放掉上一段還在響的音
       tr.stop();
       tr.cancel(0);
       tr.position = 0;
@@ -1094,6 +1095,13 @@ export default function App() {
     if (isPlaying) pausePlayback();
     else if (isPaused) resumePlayback();
     else playAll();
+  }
+
+  // 從頭播放：不管現在播到哪，都回到第一小節重來
+  function restartPlayback() {
+    if (!progression.length) return;
+    stopPlayback();
+    playAll();
   }
 
   // 停止並回到開頭（換內容時用）
@@ -1239,6 +1247,7 @@ export default function App() {
             canUndo={canUndo}
             loadPreset={loadPreset}
             playAll={togglePlay}
+            restartPlay={restartPlayback}
             isPlaying={isPlaying}
             isPaused={isPaused}
             done={completed.chords}
@@ -1258,6 +1267,7 @@ export default function App() {
             timeSig={timeSig}
             toggleMelodyCell={toggleMelodyCell}
             playAll={togglePlay}
+            restartPlay={restartPlayback}
             isPlaying={isPlaying}
             isPaused={isPaused}
             playheadCol={playheadCol}
@@ -2147,7 +2157,7 @@ function ChordPicker({ onPick, onDragChord, onDragChordEnd, onTouchChord }) {
 function ChordsPage({
   progression, playChord, addToProgression,
   removeFromProgression, timeSig, changeTimeSig, insertSecondHalf, insertChordAt, moveChord, moveChordIntoSecondHalf,
-  loadPreset, playAll, isPlaying, isPaused, done, toggleDone, onSave, savedMsg,
+  loadPreset, playAll, restartPlay, isPlaying, isPaused, done, toggleDone, onSave, savedMsg,
   onExportMidi, onCopyChords, copiedMsg, onUndo, canUndo,
 }) {
   const [zoomImg, setZoomImg] = useState(null);
@@ -2651,6 +2661,14 @@ function ChordsPage({
             {isPlaying ? <><Pause size={15} /> 暫停</> : isPaused ? <><Play size={15} /> 繼續</> : <><Play size={15} /> 播放進行</>}
           </button>
           <button
+            onClick={restartPlay}
+            disabled={!progression.length}
+            title="回到第一小節，從頭播放"
+            className="inline-flex items-center gap-2 border border-[#333B52] rounded-md px-4 py-2 text-sm text-[#A9AFC3] hover:text-[#F2EFE9] hover:border-[#E8A33D] disabled:opacity-40"
+          >
+            <SkipBack size={15} /> 從頭播放
+          </button>
+          <button
             onClick={onUndo}
             disabled={!canUndo}
             title="復原上一個動作"
@@ -2692,7 +2710,7 @@ function ChordsPage({
 /* ---------------------------------------------------------------- */
 
 function MelodyPage({
-  progression, melody, timeSig, toggleMelodyCell, playAll, isPlaying, isPaused, playheadCol,
+  progression, melody, timeSig, toggleMelodyCell, playAll, restartPlay, isPlaying, isPaused, playheadCol,
   goToChords, done, toggleDone, onSave, savedMsg, onExportMidi, onUndo, canUndo,
 }) {
   const rows = [7, 6, 5, 4, 3, 2, 1, 0]; // extended degrees, high to low
@@ -2794,6 +2812,13 @@ function MelodyPage({
               className="inline-flex items-center gap-2 bg-[#E8A33D] text-[#1B1F2A] font-medium rounded-md px-4 py-2 text-sm"
             >
               {isPlaying ? <><Pause size={15} /> 暫停</> : isPaused ? <><Play size={15} /> 繼續</> : <><Play size={15} /> 播放旋律</>}
+            </button>
+            <button
+              onClick={restartPlay}
+              title="回到第一小節，從頭播放"
+              className="inline-flex items-center gap-2 border border-[#333B52] rounded-md px-4 py-2 text-sm text-[#A9AFC3] hover:text-[#F2EFE9] hover:border-[#E8A33D]"
+            >
+              <SkipBack size={15} /> 從頭播放
             </button>
             <button
               onClick={onSave}
