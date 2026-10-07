@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import * as Tone from 'tone';
-import { Music, ListMusic, PenLine, Guitar, Waves, Play, Save, Check, X, Download, LogOut, ExternalLink, Headphones, Copy, Undo2 } from 'lucide-react';
+import { Music, ListMusic, PenLine, Guitar, Waves, Play, Pause, Save, Check, X, Download, LogOut, ExternalLink, Headphones, Copy, Undo2 } from 'lucide-react';
 import { auth, googleProvider, db } from './firebase';
 import { onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth';
 import { doc, getDoc, setDoc, collection, getDocs } from 'firebase/firestore';
@@ -595,6 +595,7 @@ export default function App() {
   const [savedMsg, setSavedMsg] = useState('');
   const [copiedMsg, setCopiedMsg] = useState('');
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
   const [playheadCol, setPlayheadCol] = useState(-1);
   const [rhymeOn, setRhymeOn] = useState(false);
   const [lyricAnalysis, setLyricAnalysis] = useState({
@@ -623,12 +624,32 @@ export default function App() {
   const pianoRef = useRef(null);
   const pianoReadyRef = useRef(false);
   const loadedRef = useRef(false);
+  const playheadTimerRef = useRef(null);   // 播放進度計時器
+  const playbackRef = useRef(null);        // 本次播放的 { dur, totalCols }
+
+  function transport() {
+    return (Tone.getTransport && Tone.getTransport()) || Tone.Transport;
+  }
+
+  function stopPlayheadTimer() {
+    if (playheadTimerRef.current) {
+      clearInterval(playheadTimerRef.current);
+      playheadTimerRef.current = null;
+    }
+  }
+
+  function releaseAllVoices() {
+    try { polyRef.current && polyRef.current.releaseAll(); } catch (e) { /* noop */ }
+    try { synthRef.current && synthRef.current.triggerRelease(); } catch (e) { /* noop */ }
+    try { pianoRef.current && pianoRef.current.releaseAll(); } catch (e) { /* noop */ }
+  }
 
   // 復原上一步：每次動作前存一份「進行＋旋律＋拍號」快照
   const historyRef = useRef([]);
   const [canUndo, setCanUndo] = useState(false);
 
   function recordHistory() {
+    stopPlayback(); // 動作前先停掉播放，避免排程跟畫面不同步
     const snap = JSON.stringify({ progression, melody, timeSig });
     const last = historyRef.current[historyRef.current.length - 1];
     if (last === snap) return; // 同一次動作不重複記錄
@@ -1016,34 +1037,94 @@ export default function App() {
   }
 
   function playAll() {
-    if (!progression.length || isPlaying) return;
+    if (!progression.length) return;
     ensureAudio().then(() => {
-      setIsPlaying(true);
-      const now = Tone.now() + 0.05;
+      const tr = transport();
+      tr.stop();
+      tr.cancel(0);
+      tr.position = 0;
       const dur = unitDur(timeSig); // 一格的秒數
       const voiced = fullChordNotes(rootMidi, progression);
       let chordCol = 0;
       voiced.forEach((notes, i) => {
         const beats = beatsOf(progression[i]);
-        playNotes(notes.map(midiToNote), beats * dur * 1.1, now + chordCol * dur);
+        const t = 0.05 + chordCol * dur;
+        tr.schedule((time) => playNotes(notes.map(midiToNote), beats * dur * 1.1, time), t);
         chordCol += beats;
       });
       melody.forEach((deg, col) => {
         if (deg == null) return;
-        const t = now + col * dur;
-        const note = midiToNote(extendedDegreeMidi(rootMidi, deg));
-        if (pianoReadyRef.current && pianoRef.current) pianoRef.current.triggerAttackRelease(note, dur * 1.1, t);
-        else synthRef.current.triggerAttackRelease(note, dur * 0.85, t);
+        const t = 0.05 + col * dur;
+        tr.schedule((time) => {
+          const note = midiToNote(extendedDegreeMidi(rootMidi, deg));
+          if (pianoReadyRef.current && pianoRef.current) pianoRef.current.triggerAttackRelease(note, dur * 1.1, time);
+          else synthRef.current.triggerAttackRelease(note, dur * 0.85, time);
+        }, t);
       });
       const totalCols = totalBeats(progression);
-      for (let col = 0; col < totalCols; col++) {
-        setTimeout(() => setPlayheadCol(col), col * dur * 1000 + 50);
-      }
-      setTimeout(() => {
-        setIsPlaying(false);
-        setPlayheadCol(-1);
-      }, totalCols * dur * 1000 + 300);
+      playbackRef.current = { dur, totalCols };
+      setIsPlaying(true);
+      setIsPaused(false);
+      tr.start();
+      startPlayheadTimer();
     });
+  }
+
+  // 暫停：停住 Transport（排程保留，可從原處繼續），並放掉正在響的音
+  function pausePlayback() {
+    transport().pause();
+    releaseAllVoices();
+    stopPlayheadTimer();
+    setIsPlaying(false);
+    setIsPaused(true);
+  }
+
+  // 繼續：從暫停的地方接著播
+  function resumePlayback() {
+    ensureAudio().then(() => {
+      transport().start();
+      setIsPlaying(true);
+      setIsPaused(false);
+      startPlayheadTimer();
+    });
+  }
+
+  // 播放／暫停／繼續 一個按鈕搞定
+  function togglePlay() {
+    if (isPlaying) pausePlayback();
+    else if (isPaused) resumePlayback();
+    else playAll();
+  }
+
+  // 停止並回到開頭（換內容時用）
+  function stopPlayback() {
+    const tr = transport();
+    try { tr.stop(); tr.cancel(0); } catch (e) { /* noop */ }
+    releaseAllVoices();
+    stopPlayheadTimer();
+    setIsPlaying(false);
+    setIsPaused(false);
+    setPlayheadCol(-1);
+  }
+
+  function startPlayheadTimer() {
+    stopPlayheadTimer();
+    playheadTimerRef.current = setInterval(() => {
+      const meta = playbackRef.current;
+      if (!meta) return;
+      const { dur, totalCols } = meta;
+      const sec = transport().seconds;
+      if (sec >= totalCols * dur + 0.3) {
+        stopPlayheadTimer();
+        try { transport().stop(); transport().cancel(0); } catch (e) { /* noop */ }
+        setIsPlaying(false);
+        setIsPaused(false);
+        setPlayheadCol(-1);
+        return;
+      }
+      const col = Math.floor(Math.max(0, sec - 0.05) / dur);
+      setPlayheadCol(col < totalCols ? col : totalCols - 1);
+    }, 60);
   }
 
   function toggleComplete(id) {
@@ -1073,6 +1154,15 @@ export default function App() {
         @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@600;700&family=Noto+Sans+TC:wght@400;500;600&display=swap');
         .font-serif { font-family: 'Noto Serif TC', 'PingFang TC', 'Microsoft JhengHei', serif; }
         .font-sans { font-family: 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', system-ui, sans-serif; }
+        /* 觸控裝置：避免長按/拖曳時選字、跳出系統查詢或拖動整個網頁 */
+        .no-touch-callout {
+          -webkit-touch-callout: none;
+          -webkit-user-select: none;
+          user-select: none;
+          -webkit-user-drag: none;
+          touch-action: manipulation;
+        }
+        img { -webkit-user-drag: none; }
       `}</style>
 
       {/* 側邊導覽 */}
@@ -1148,8 +1238,9 @@ export default function App() {
             onUndo={undo}
             canUndo={canUndo}
             loadPreset={loadPreset}
-            playAll={playAll}
+            playAll={togglePlay}
             isPlaying={isPlaying}
+            isPaused={isPaused}
             done={completed.chords}
             toggleDone={() => toggleComplete('chords')}
             onSave={() => persist({})}
@@ -1166,8 +1257,9 @@ export default function App() {
             melody={melody}
             timeSig={timeSig}
             toggleMelodyCell={toggleMelodyCell}
-            playAll={playAll}
+            playAll={togglePlay}
             isPlaying={isPlaying}
+            isPaused={isPaused}
             playheadCol={playheadCol}
             goToChords={() => setPage('chords')}
             done={completed.melody}
@@ -1973,7 +2065,7 @@ function GeneralLyricsContent({ rhymeOn, setRhymeOn }) {
 /* 第三排：下拉選單選和弦（根音 + 升降記號 + 性質）                      */
 /* ---------------------------------------------------------------- */
 
-function ChordPicker({ onPick, onDragChord, onDragChordEnd }) {
+function ChordPicker({ onPick, onDragChord, onDragChordEnd, onTouchChord }) {
   const [rootIdx, setRootIdx] = useState(0);
   const [accIdx, setAccIdx] = useState(0);
   const [qualIdx, setQualIdx] = useState(0);
@@ -2023,8 +2115,9 @@ function ChordPicker({ onPick, onDragChord, onDragChordEnd }) {
             onDragChord && onDragChord(chord);
           }}
           onDragEnd={() => onDragChordEnd && onDragChordEnd()}
+          onTouchStart={(e) => onTouchChord && onTouchChord(e, { type: 'chord', chord })}
           title="把這個和弦拖到小節的 ＋ 或小節框裡"
-          className="font-serif text-lg ml-1 min-w-[4.5rem] text-[#F2EFE9] cursor-grab active:cursor-grabbing border border-dashed border-transparent hover:border-[#E8A33D] rounded px-1"
+          className="font-serif text-lg ml-1 min-w-[4.5rem] text-[#F2EFE9] cursor-grab active:cursor-grabbing border border-dashed border-transparent hover:border-[#E8A33D] rounded px-1 no-touch-callout"
         >
           {sym}
         </span>
@@ -2054,7 +2147,7 @@ function ChordPicker({ onPick, onDragChord, onDragChordEnd }) {
 function ChordsPage({
   progression, playChord, addToProgression,
   removeFromProgression, timeSig, changeTimeSig, insertSecondHalf, insertChordAt, moveChord, moveChordIntoSecondHalf,
-  loadPreset, playAll, isPlaying, done, toggleDone, onSave, savedMsg,
+  loadPreset, playAll, isPlaying, isPaused, done, toggleDone, onSave, savedMsg,
   onExportMidi, onCopyChords, copiedMsg, onUndo, canUndo,
 }) {
   const [zoomImg, setZoomImg] = useState(null);
@@ -2062,6 +2155,165 @@ function ChordsPage({
   const [dragChord, setDragChord] = useState(null);    // 上方和弦按鈕的拖曳來源（度數）
   const beatsPerBar = tsDef(timeSig).num;
   const canHalf = beatsPerBar % 2 === 0;
+
+  // ---- 手機／平板：觸控拖曳（HTML5 拖曳在觸控裝置無效）----
+  const touchRef = useRef(null);
+  const applyDropRef = useRef(() => {});
+  const suppressClickRef = useRef(false);
+  const [ghost, setGhost] = useState(null);   // 跟著手指的和弦浮標 { label, x, y }
+  const [touchKey, setTouchKey] = useState(null); // 目前手指下的投放位置
+
+  function startTouchDrag(e, src) {
+    const touch = e.touches && e.touches[0];
+    if (!touch || touchRef.current) return;
+    // 手指直接按在小按鈕（×、＋）上 → 當作點擊，不啟動拖曳
+    if (e.target && e.target.closest && e.currentTarget.tagName !== 'BUTTON' && e.target.closest('button')) return;
+    const t = { src, startX: touch.clientX, startY: touch.clientY, active: false, timer: null };
+    t.timer = setTimeout(() => {
+      t.active = true;
+      setGhost({ label: touchLabel(src), x: t.startX, y: t.startY });
+      if (navigator.vibrate) { try { navigator.vibrate(12); } catch (err) { /* noop */ } }
+    }, 200);
+    touchRef.current = t;
+  }
+
+  function touchLabel(src) {
+    try {
+      if (src.type === 'chord') return chordOf(src.chord).sym;
+      return chordOf(progression[src.idx]).sym;
+    } catch (err) {
+      return '';
+    }
+  }
+
+  function keyFromPoint(x, y) {
+    const el = document.elementFromPoint(x, y);
+    const holder = el && el.closest ? el.closest('[data-drop]') : null;
+    return holder ? holder.getAttribute('data-drop') : null;
+  }
+
+  useEffect(() => {
+    function onMove(e) {
+      const t = touchRef.current;
+      if (!t) return;
+      const touch = e.touches && e.touches[0];
+      if (!touch) return;
+      if (!t.active) {
+        // 還沒觸發長按就移動 → 當作捲動頁面
+        if (Math.abs(touch.clientX - t.startX) > 12 || Math.abs(touch.clientY - t.startY) > 12) {
+          clearTimeout(t.timer);
+          touchRef.current = null;
+        }
+        return;
+      }
+      e.preventDefault(); // 拖曳中不捲動頁面
+      const key = keyFromPoint(touch.clientX, touch.clientY);
+      if (key !== touchKey) setTouchKey(key);
+      setGhost((g) => (g ? { ...g, x: touch.clientX, y: touch.clientY } : g));
+    }
+    function onEnd(e) {
+      const t = touchRef.current;
+      if (!t) return;
+      clearTimeout(t.timer);
+      touchRef.current = null;
+      if (t.active) {
+        const touch = e.changedTouches && e.changedTouches[0];
+        const key = touch ? keyFromPoint(touch.clientX, touch.clientY) : null;
+        applyDropRef.current(key, t.src);
+        suppressClickRef.current = true;
+        setTimeout(() => { suppressClickRef.current = false; }, 400);
+      }
+      setGhost(null);
+      setTouchKey(null);
+    }
+    document.addEventListener('touchmove', onMove, { passive: false });
+    document.addEventListener('touchend', onEnd);
+    document.addEventListener('touchcancel', onEnd);
+    return () => {
+      document.removeEventListener('touchmove', onMove);
+      document.removeEventListener('touchend', onEnd);
+      document.removeEventListener('touchcancel', onEnd);
+    };
+  }, [touchKey]);
+
+  // 統一投放邏輯：key 是資料標記（end/empty/measure:n/chord:n/plus:n），src 是拖曳來源
+  function applyDrop(key, src) {
+    if (!key || !src) return false;
+    const isChord = src.type === 'chord';
+    const val = isChord ? src.chord : src.idx;
+    const parts = key.split(':');
+    const head = parts[0];
+    const n = Number(parts[1]);
+
+    if (head === 'empty') {
+      if (isChord) insertChordAt(0, val); else moveChord(val, 0);
+      return true;
+    }
+    if (head === 'end') {
+      const lastM = measures[measures.length - 1];
+      const lastIdx = lastM ? lastM.chords[lastM.chords.length - 1].i : -1;
+      const lastCanAdd = lastM && canHalf && lastM.chords.length < 2;
+      if (isChord) {
+        if (lastCanAdd) insertSecondHalf(lastIdx, val);
+        else insertChordAt(progression.length, val);
+      } else if (lastCanAdd && val !== lastIdx) {
+        moveChordIntoSecondHalf(val, lastIdx);
+      } else {
+        moveChord(val, progression.length - 1);
+      }
+      return true;
+    }
+    if (head === 'measure') {
+      const m = measures[n];
+      if (!m) return false;
+      const firstIdx = m.chords[0].i;
+      const lastIdx = m.chords[m.chords.length - 1].i;
+      const canAdd = canHalf && m.chords.length < 2;
+      if (isChord) {
+        if (canAdd) insertSecondHalf(lastIdx, val);
+        else insertChordAt(lastIdx + 1, val);
+      } else if (canAdd) {
+        moveChordIntoSecondHalf(val, lastIdx);
+      } else {
+        moveChord(val, firstIdx);
+      }
+      return true;
+    }
+    if (head === 'chord') {
+      const i = n;
+      const m = measures.find((mm) => mm.chords.some((c) => c.i === i));
+      const canAdd = m && canHalf && m.chords.length < 2;
+      const isLast = m && m.chords[m.chords.length - 1].i === i;
+      if (isChord) {
+        if (canAdd && isLast) insertSecondHalf(i, val);
+        else insertChordAt(i, val);
+      } else if (val !== i) {
+        moveChord(val, i);
+      }
+      return true;
+    }
+    if (head === 'plus') {
+      const i = n;
+      if (isChord) insertSecondHalf(i, val);
+      else if (val !== i) moveChordIntoSecondHalf(val, i);
+      return true;
+    }
+    return false;
+  }
+  applyDropRef.current = applyDrop;
+
+  // HTML5 拖曳的來源（滑鼠）
+  function currentHtml5Source() {
+    if (dragChord != null) return { type: 'chord', chord: dragChord };
+    if (dragIdx != null) return { type: 'idx', idx: dragIdx };
+    return null;
+  }
+  function html5Drop(e) {
+    e.stopPropagation();
+    applyDrop(e.currentTarget.getAttribute('data-drop'), currentHtml5Source());
+    setDragIdx(null);
+    setDragChord(null);
+  }
 
   // 依小節分組：同一小節的和弦包在同一個框裡（框左邊是小節編號）
   const measures = [];
@@ -2115,6 +2367,16 @@ function ChordsPage({
             <X size={18} />
           </button>
           <span className="absolute bottom-4 left-1/2 -translate-x-1/2 text-xs text-[#A9AFC3]">點任意處關閉</span>
+        </div>
+      )}
+
+      {/* 觸控拖曳中：跟著手指的和弦浮標 */}
+      {ghost && (
+        <div
+          className="fixed z-[60] pointer-events-none px-3 py-1.5 rounded-md bg-[#E8A33D] text-[#1B1F2A] text-sm font-medium shadow-lg -translate-x-1/2 -translate-y-1/2"
+          style={{ left: ghost.x, top: ghost.y - 36 }}
+        >
+          {ghost.label}
         </div>
       )}
 
@@ -2226,11 +2488,13 @@ function ChordsPage({
                       setDragChord(d);
                     }}
                     onDragEnd={() => setDragChord(null)}
+                    onTouchStart={(e) => startTouchDrag(e, { type: 'chord', chord: d })}
                     onClick={() => {
+                      if (suppressClickRef.current) return; // 剛拖完，不要觸發點擊
                       playChord(d);
                       addToProgression(d);
                     }}
-                    className={`flex flex-col items-center gap-1 border border-[#333B52] rounded-md py-3 transition-colors cursor-grab active:cursor-grabbing ${
+                    className={`flex flex-col items-center gap-1 border border-[#333B52] rounded-md py-3 transition-colors cursor-grab active:cursor-grabbing no-touch-callout ${
                       c.rare ? 'opacity-50 hover:opacity-100' : ''
                     } ${isWarm ? 'hover:border-[#E8A33D]' : isCool ? 'hover:border-[#6FA8DC]' : 'hover:border-[#A9AFC3]'}`}
                   >
@@ -2256,6 +2520,7 @@ function ChordsPage({
           }}
           onDragChord={setDragChord}
           onDragChordEnd={() => setDragChord(null)}
+          onTouchChord={startTouchDrag}
         />
       </Panel>
 
@@ -2284,12 +2549,9 @@ function ChordsPage({
         {progression.length === 0 ? (
           <p
             className="text-sm text-[#A9AFC3] mb-4 border border-dashed border-[#333B52] rounded-md px-4 py-6 text-center"
+            data-drop="empty"
             onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => {
-              e.preventDefault();
-              if (dragChord != null) insertChordAt(0, dragChord);
-              setDragChord(null);
-            }}
+            onDrop={html5Drop}
           >
             還沒有和弦，點上面的和弦按鈕，或直接把和弦拖進來開始建立吧。
           </p>
@@ -2297,48 +2559,23 @@ function ChordsPage({
           <>
           <div
             className="flex flex-wrap gap-3 mb-5"
+            data-drop="end"
             onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => {
-              e.stopPropagation();
-              const lastM = measures[measures.length - 1];
-              const lastIdx = lastM ? lastM.chords[lastM.chords.length - 1].i : -1;
-              const lastCanAdd = lastM && canHalf && lastM.chords.length < 2;
-              if (dragChord != null) {
-                // 最後一個小節還有空位就補進後半，否則加到最後
-                if (lastCanAdd) insertSecondHalf(lastIdx, dragChord);
-                else insertChordAt(progression.length, dragChord);
-              } else if (dragIdx != null) {
-                if (lastCanAdd && dragIdx !== lastIdx) moveChordIntoSecondHalf(dragIdx, lastIdx);
-                else moveChord(dragIdx, progression.length - 1);
-              }
-              setDragIdx(null);
-              setDragChord(null);
-            }}
+            onDrop={html5Drop}
           >
-            {measures.map((m) => {
-              const firstIdx = m.chords[0].i;
-              const lastIdx = m.chords[m.chords.length - 1].i;
+            {measures.map((m, mi) => {
               // 只要這個小節還只有 1 個和弦，就能再放第二個（整的會切兩半、半的補後半）
               const canAdd = canHalf && m.chords.length < 2;
+              const dragging = dragChord != null || dragIdx != null;
+              const dropKey = `measure:${mi}`;
               return (
                 <div
                   key={m.no}
+                  data-drop={dropKey}
                   onDragOver={(e) => e.preventDefault()}
-                  onDrop={(e) => {
-                    e.stopPropagation();
-                    if (dragChord != null) {
-                      // 這個小節還缺後半 → 放進後半；已滿 → 加到這個小節後面
-                      if (canAdd) insertSecondHalf(lastIdx, dragChord);
-                      else insertChordAt(lastIdx + 1, dragChord);
-                    } else if (dragIdx != null) {
-                      if (canAdd) moveChordIntoSecondHalf(dragIdx, lastIdx); // 搬進這個小節的後半
-                      else moveChord(dragIdx, firstIdx);
-                    }
-                    setDragIdx(null);
-                    setDragChord(null);
-                  }}
+                  onDrop={html5Drop}
                   className={`flex items-stretch bg-[#1F2430] border rounded-md overflow-hidden transition-colors ${
-                    (dragChord != null || dragIdx != null) && canAdd
+                    dragging && (touchKey === dropKey || canAdd)
                       ? 'border-dashed border-[#E8A33D]'
                       : 'border-[#333B52]'
                   }`}
@@ -2357,25 +2594,21 @@ function ChordsPage({
                         <span
                           key={i}
                           draggable
+                          data-drop={`chord:${i}`}
                           onDragStart={(e) => {
                             e.dataTransfer.setData('text/plain', chordOf(item).sym);
                             e.dataTransfer.effectAllowed = 'move';
                             setDragIdx(i);
                           }}
+                          onDragEnd={() => setDragIdx(null)}
+                          onTouchStart={(e) => startTouchDrag(e, { type: 'idx', idx: i })}
                           onDragOver={(e) => e.preventDefault()}
-                          onDrop={(e) => {
-                            e.stopPropagation();
-                            if (dragChord != null) {
-                              // 拖到「這個小節的最後一個和弦」上且小節還缺後半 → 直接補進後半
-                              if (canAdd && isLast) insertSecondHalf(i, dragChord);
-                              else insertChordAt(i, dragChord);
-                            } else if (dragIdx != null && dragIdx !== i) moveChord(dragIdx, i);
-                            setDragIdx(null);
-                            setDragChord(null);
-                          }}
-                          className={`inline-flex items-center gap-2 px-3 py-1.5 text-sm cursor-grab active:cursor-grabbing ${
+                          onDrop={html5Drop}
+                          className={`inline-flex items-center gap-2 px-3 py-1.5 text-sm cursor-grab active:cursor-grabbing no-touch-callout ${
                             second ? 'border-l-2 border-l-[#E8A33D]/60' : ''
-                          } ${dragIdx === i ? 'opacity-60 bg-[#E8A33D]/10' : ''}`}
+                          } ${dragIdx === i ? 'opacity-60 bg-[#E8A33D]/10' : ''} ${
+                            touchKey === `chord:${i}` ? 'bg-[#E8A33D]/20 outline outline-dashed outline-1 outline-[#E8A33D]' : ''
+                          }`}
                         >
                           <span className={`font-medium ${isWarm ? 'text-[#E8A33D]' : isCool ? 'text-[#6FA8DC]' : 'text-[#A9AFC3]'}`}>
                             {def.sym}
@@ -2383,17 +2616,12 @@ function ChordsPage({
                           {canAdd && isLast && (
                             <button
                               onClick={(e) => { e.stopPropagation(); insertSecondHalf(i); }}
+                              data-drop={`plus:${i}`}
                               onDragOver={(e) => e.preventDefault()}
-                              onDrop={(e) => {
-                                e.stopPropagation();
-                                if (dragChord != null) insertSecondHalf(i, dragChord);   // 從上面和弦區拖進來
-                                else if (dragIdx != null) moveChordIntoSecondHalf(dragIdx, i); // 把已加入的和弦搬進後半
-                                setDragChord(null);
-                                setDragIdx(null);
-                              }}
+                              onDrop={html5Drop}
                               title="把和弦拖進來，放進這個小節的後半"
                               className={`text-[10px] border rounded px-1 leading-none py-0.5 transition-colors ${
-                                dragChord != null || dragIdx != null
+                                dragging || touchKey === `plus:${i}`
                                   ? 'border-[#E8A33D] text-[#E8A33D] bg-[#E8A33D]/10'
                                   : 'border-[#333B52] text-[#6B7285] hover:text-[#E8A33D] hover:border-[#E8A33D]'
                               }`}
@@ -2417,10 +2645,10 @@ function ChordsPage({
         <div className="flex flex-wrap gap-3">
           <button
             onClick={playAll}
-            disabled={!progression.length || isPlaying}
+            disabled={!progression.length}
             className="inline-flex items-center gap-2 bg-[#E8A33D] text-[#1B1F2A] font-medium rounded-md px-4 py-2 text-sm disabled:opacity-40"
           >
-            <Play size={15} /> 播放進行
+            {isPlaying ? <><Pause size={15} /> 暫停</> : isPaused ? <><Play size={15} /> 繼續</> : <><Play size={15} /> 播放進行</>}
           </button>
           <button
             onClick={onUndo}
@@ -2464,7 +2692,7 @@ function ChordsPage({
 /* ---------------------------------------------------------------- */
 
 function MelodyPage({
-  progression, melody, timeSig, toggleMelodyCell, playAll, isPlaying, playheadCol,
+  progression, melody, timeSig, toggleMelodyCell, playAll, isPlaying, isPaused, playheadCol,
   goToChords, done, toggleDone, onSave, savedMsg, onExportMidi, onUndo, canUndo,
 }) {
   const rows = [7, 6, 5, 4, 3, 2, 1, 0]; // extended degrees, high to low
@@ -2563,10 +2791,9 @@ function MelodyPage({
           <div className="flex flex-wrap items-center gap-3 mt-6">
             <button
               onClick={playAll}
-              disabled={isPlaying}
-              className="inline-flex items-center gap-2 bg-[#E8A33D] text-[#1B1F2A] font-medium rounded-md px-4 py-2 text-sm disabled:opacity-40"
+              className="inline-flex items-center gap-2 bg-[#E8A33D] text-[#1B1F2A] font-medium rounded-md px-4 py-2 text-sm"
             >
-              <Play size={15} /> 播放旋律
+              {isPlaying ? <><Pause size={15} /> 暫停</> : isPaused ? <><Play size={15} /> 繼續</> : <><Play size={15} /> 播放旋律</>}
             </button>
             <button
               onClick={onSave}
