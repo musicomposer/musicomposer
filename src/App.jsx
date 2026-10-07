@@ -195,6 +195,21 @@ const TIME_SIGNATURES = [
 function tsDef(id) {
   return TIME_SIGNATURES.find((t) => t.id === id) || TIME_SIGNATURES[0];
 }
+
+/* 觸控裝置偵測：手機/平板上 HTML5 拖曳無效，還會觸發系統原生拖曳（丟到 Google 搜尋），
+   所以觸控裝置改用自製的長按拖曳，並把 draggable 關掉。 */
+function isTouchDevice() {
+  if (typeof window === 'undefined') return false;
+  if (window.matchMedia) return window.matchMedia('(pointer: coarse)').matches; // 主要指標是手指（手機／平板）
+  return typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0;
+}
+/* 目前這次操作是不是用手指（用來擋掉手指觸發的原生 dragstart） */
+let lastPointerType = 'mouse';
+if (typeof document !== 'undefined') {
+  document.addEventListener('pointerdown', (e) => {
+    lastPointerType = e.pointerType === 'touch' ? 'touch' : 'mouse';
+  }, { capture: true, passive: true });
+}
 function unitDur(id) {
   return (BEAT_DUR * 4) / tsDef(id).den; // 每格秒數（6/8 的一格是八分音符）
 }
@@ -2118,7 +2133,7 @@ function ChordPicker({ onPick, onDragChord, onDragChordEnd, onTouchChord }) {
         </select>
 
         <span
-          draggable
+          draggable={!isTouchDevice()}
           onDragStart={(e) => {
             e.dataTransfer.setData('text/plain', sym);
             e.dataTransfer.effectAllowed = 'copy';
@@ -2165,6 +2180,8 @@ function ChordsPage({
   const [dragChord, setDragChord] = useState(null);    // 上方和弦按鈕的拖曳來源（度數）
   const beatsPerBar = tsDef(timeSig).num;
   const canHalf = beatsPerBar % 2 === 0;
+  // 觸控裝置：關掉 HTML5 draggable（會觸發系統原生拖曳、丟到 Google 搜尋），改用下面的長按拖曳
+  const touchUI = isTouchDevice();
 
   // ---- 手機／平板：觸控拖曳（HTML5 拖曳在觸控裝置無效）----
   const touchRef = useRef(null);
@@ -2201,6 +2218,23 @@ function ChordsPage({
     const holder = el && el.closest ? el.closest('[data-drop]') : null;
     return holder ? holder.getAttribute('data-drop') : null;
   }
+
+  useEffect(() => {
+    // 手指觸發的原生拖曳一律擋掉：手機 Chrome 會把拖出去的文字/元素丟到 Google 搜尋
+    function blockNativeDrag(e) {
+      if (lastPointerType === 'touch' || isTouchDevice()) e.preventDefault();
+    }
+    document.addEventListener('dragstart', blockNativeDrag, true);
+    // 長按選字選單（複製/查詢）也擋掉
+    function blockMenu(e) {
+      if (lastPointerType === 'touch') e.preventDefault();
+    }
+    document.addEventListener('contextmenu', blockMenu, true);
+    return () => {
+      document.removeEventListener('dragstart', blockNativeDrag, true);
+      document.removeEventListener('contextmenu', blockMenu, true);
+    };
+  }, []);
 
   useEffect(() => {
     function onMove(e) {
@@ -2491,7 +2525,7 @@ function ChordsPage({
                 return (
                   <button
                     key={c.sym}
-                    draggable
+                    draggable={!touchUI}
                     onDragStart={(e) => {
                       e.dataTransfer.setData('text/plain', c.sym);
                       e.dataTransfer.effectAllowed = 'copy';
@@ -2603,7 +2637,7 @@ function ChordsPage({
                       return (
                         <span
                           key={i}
-                          draggable
+                          draggable={!touchUI}
                           data-drop={`chord:${i}`}
                           onDragStart={(e) => {
                             e.dataTransfer.setData('text/plain', chordOf(item).sym);
