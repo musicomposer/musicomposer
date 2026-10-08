@@ -56,6 +56,14 @@ const CHORD_QUALITIES = [
   { id: 'm6', en: 'm6', label: '小六和弦', suffix: 'm6', iv: [0, 3, 7, 9], tone: 'cool' },
   { id: 'add9', en: 'add9', label: '加九和弦', suffix: 'add9', iv: [0, 4, 7, 14], tone: 'warm' },
   { id: '9', en: '9', label: '屬九和弦', suffix: '9', iv: [0, 4, 7, 10, 14], tone: 'warm' },
+  { id: 'm9', en: 'm9', label: '小九和弦', suffix: 'm9', iv: [0, 3, 7, 10, 14], tone: 'cool' },
+  { id: 'maj9', en: 'maj9', label: '大九和弦', suffix: 'maj9', iv: [0, 4, 7, 11, 14], tone: 'warm' },
+  { id: '11', en: '11', label: '屬十一和弦', suffix: '11', iv: [0, 4, 7, 10, 14, 17], tone: 'warm' },
+  { id: 'm11', en: 'm11', label: '小十一和弦', suffix: 'm11', iv: [0, 3, 7, 10, 14, 17], tone: 'cool' },
+  { id: 'maj11', en: 'maj11', label: '大十一和弦', suffix: 'maj11', iv: [0, 4, 7, 11, 14, 17], tone: 'warm' },
+  { id: '13', en: '13', label: '屬十三和弦', suffix: '13', iv: [0, 4, 7, 10, 14, 21], tone: 'warm' },
+  { id: 'm13', en: 'm13', label: '小十三和弦', suffix: 'm13', iv: [0, 3, 7, 10, 14, 21], tone: 'cool' },
+  { id: 'maj13', en: 'maj13', label: '大十三和弦', suffix: 'maj13', iv: [0, 4, 7, 11, 14, 21], tone: 'warm' },
 ];
 
 const ROOT_LETTERS = [
@@ -2202,7 +2210,7 @@ function ChordPicker({ onPick, onDragChord, onDragChordEnd, onTouchChord }) {
           加入進行
         </button>
       </div>
-      <p className="text-xs text-[#A9AFC3] mt-2">15 種性質 × 12 種根音，加進去的和弦跟上面的按鈕一樣會一起播放與匯出。</p>
+      <p className="text-xs text-[#A9AFC3] mt-2">{CHORD_QUALITIES.length} 種性質 × 12 種根音，加進去的和弦跟上面的按鈕一樣會一起播放與匯出。</p>
     </div>
   );
 }
