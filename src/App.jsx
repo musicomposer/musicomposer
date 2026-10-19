@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import * as Tone from 'tone';
-import { Music, ListMusic, PenLine, Guitar, Waves, Play, Pause, SkipBack, Save, Check, X, Download, LogOut, ExternalLink, Headphones, Copy, Undo2, Drum } from 'lucide-react';
+import { Music, ListMusic, PenLine, Guitar, Waves, Play, Pause, SkipBack, Save, Check, X, Download, LogOut, ExternalLink, Headphones, Copy, Undo2 } from 'lucide-react';
 import { auth, googleProvider, db } from './firebase';
 import { onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth';
 import { doc, getDoc, setDoc, collection, getDocs } from 'firebase/firestore';
@@ -359,19 +359,8 @@ const CHAPTERS = [
   { id: 'lyric-analysis', label: '歌詞記憶分析', icon: Headphones },
   { id: 'lyrics', label: '歌詞創作', icon: PenLine },
   { id: 'chords', label: '和弦進行', icon: Guitar },
-  { id: 'loop', label: 'Loop 計畫', icon: Drum },
   { id: 'melody', label: '旋律寫作', icon: Waves },
 ];
-
-/* Loop 計畫表：學生記錄在 GarageBand 裡要用的氛圍與音軌 */
-const LOOP_MOODS = ['抒情', '輕快', '搖滾', '電子', '慵懶爵士', '民謠'];
-const LOOP_LAYERS = [
-  { id: 'drums', label: '鼓組', note: '定整首歌的速度與律動' },
-  { id: 'bass', label: '貝斯', note: '托住和弦的根音，讓歌有底' },
-  { id: 'keys', label: '鍵盤／吉他', note: '鋪和弦，主歌的主角' },
-  { id: 'pad', label: '氛圍 pad', note: '補空間感，副歌加厚用' },
-];
-const DEFAULT_LOOP_PLAN = { mood: '抒情', bpm: 88, verse: ['drums', 'keys'], chorus: ['drums', 'bass', 'keys', 'pad'], note: '' };
 
 // 科目與章節資料
 const SUBJECTS = [
@@ -631,8 +620,6 @@ export default function App() {
     custom: { song: '', hook: '', category: '' },
   });
 
-  const [loopPlan, setLoopPlan] = useState(DEFAULT_LOOP_PLAN);
-
   const [subjectLyrics, setSubjectLyrics] = useState({
     drawnSubject: null,    // 抽中的科目
     customChapter: '',     // 學生自己輸入的章節
@@ -797,15 +784,6 @@ export default function App() {
             setMelody(data.melody);
           }
           if (data.completed) setCompleted(data.completed);
-          if (data.loopPlan && typeof data.loopPlan === 'object') {
-            setLoopPlan((prev) => ({
-              mood: LOOP_MOODS.includes(data.loopPlan.mood) ? data.loopPlan.mood : prev.mood,
-              bpm: Number(data.loopPlan.bpm) > 0 ? Number(data.loopPlan.bpm) : prev.bpm,
-              verse: Array.isArray(data.loopPlan.verse) ? data.loopPlan.verse.filter((x) => LOOP_LAYERS.some((l) => l.id === x)) : prev.verse,
-              chorus: Array.isArray(data.loopPlan.chorus) ? data.loopPlan.chorus.filter((x) => LOOP_LAYERS.some((l) => l.id === x)) : prev.chorus,
-              note: typeof data.loopPlan.note === 'string' ? data.loopPlan.note : prev.note,
-            }));
-          }
           if (data.lyricAnalysis) {
             setLyricAnalysis((prev) => ({
               studentInfo: data.lyricAnalysis.studentInfo || prev.studentInfo,
@@ -831,7 +809,7 @@ export default function App() {
     async (patch) => {
       if (!loadedRef.current || !user) return;
       try {
-        const payload = { progression, melody, timeSig, completed, lyricAnalysis, subjectLyrics, loopPlan, ...patch };
+        const payload = { progression, melody, timeSig, completed, lyricAnalysis, subjectLyrics, ...patch };
         await setDoc(doc(db, 'progress', user.uid), payload, { merge: true });
         setSavedMsg('已儲存');
         setTimeout(() => setSavedMsg(''), 1800);
@@ -840,7 +818,7 @@ export default function App() {
         setTimeout(() => setSavedMsg(''), 2200);
       }
     },
-    [user, progression, melody, timeSig, completed, lyricAnalysis, subjectLyrics, loopPlan]
+    [user, progression, melody, timeSig, completed, lyricAnalysis, subjectLyrics]
   );
 
   async function ensureAudio() {
@@ -1347,17 +1325,6 @@ export default function App() {
           />
         )}
 
-        {page === 'loop' && (
-          <LoopPlanPage
-            plan={loopPlan}
-            setPlan={setLoopPlan}
-            done={completed.loop}
-            toggleDone={() => toggleComplete('loop')}
-            onSave={() => persist({})}
-            savedMsg={savedMsg}
-          />
-        )}
-
         {page === 'melody' && (
           <MelodyPage
             progression={progression}
@@ -1402,7 +1369,6 @@ function OverviewPage({ completed, go }) {
     { id: 'lyric-analysis', title: '歌詞記憶分析', desc: '聽幾首洗腦金曲的副歌片段，感受什麼樣的歌詞和節奏最容易被記住。', icon: Headphones },
     { id: 'lyrics', title: '歌詞創作', desc: '從主題發想到押韻技巧，練習把想法變成能唱的句子。', icon: PenLine },
     { id: 'chords', title: '和弦進行', desc: '用互動和弦工具聽懂每個級數的情緒，動手排出自己的和弦進行。', icon: Guitar },
-    { id: 'loop', title: 'Loop 計畫', desc: '選好氛圍、速度與主歌副歌的音軌，寫下你的 GarageBand 製作計畫。', icon: Drum },
     { id: 'melody', title: '旋律寫作', desc: '在鋼琴捲軸上為你的和弦進行畫出第一條旋律線。', icon: Waves },
   ];
   return (
@@ -2844,157 +2810,9 @@ function ChordsPage({
     </div>
   );
 }
-
+
 /* ---------------------------------------------------------------- */
-/* 章節五：Loop 計畫（在 GarageBand 製作前先記錄氛圍與音軌）            */
-/* ---------------------------------------------------------------- */
-
-function LayerToggle({ layer, on, onToggle }) {
-  return (
-    <button
-      onClick={onToggle}
-      className={`text-left border rounded-md px-3 py-2 transition-colors ${
-        on ? 'border-[#E8A33D] bg-[#E8A33D]/10' : 'border-[#333B52] hover:border-[#6B7285]'
-      }`}
-    >
-      <span className="flex items-center gap-2 text-sm">
-        <span className={`inline-block w-3.5 h-3.5 rounded-sm border flex items-center justify-center ${
-          on ? 'bg-[#E8A33D] border-[#E8A33D]' : 'border-[#6B7285]'
-        }`}>
-          {on && <Check size={11} className="text-[#1B1F2A]" />}
-        </span>
-        <span className={on ? 'text-[#F2EFE9]' : 'text-[#A9AFC3]'}>{layer.label}</span>
-      </span>
-      <span className="block text-xs text-[#6B7285] mt-1 pl-[1.4rem]">{layer.note}</span>
-    </button>
-  );
-}
-
-function LoopPlanPage({ plan, setPlan, done, toggleDone, onSave, savedMsg }) {
-  const onSaveRef = useRef(onSave);
-  onSaveRef.current = onSave;
-  const firstRenderRef = useRef(true);
-  // 狀態更新後才存檔（直接在 set() 裡呼叫會存到舊值）；滑桿拖動時防抖避免寫入太頻繁
-  useEffect(() => {
-    if (firstRenderRef.current) { firstRenderRef.current = false; return undefined; }
-    const t = setTimeout(() => onSaveRef.current(), 700);
-    return () => clearTimeout(t);
-  }, [plan]);
-
-  const set = (patch) => setPlan((prev) => ({ ...prev, ...patch }));
-  const toggleLayer = (section, id) => {
-    const cur = plan[section];
-    set({ [section]: cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id] });
-  };
-  const layerLabels = (ids) => LOOP_LAYERS.filter((l) => ids.includes(l.id)).map((l) => l.label).join(' + ') || '（尚未選擇）';
-
-  return (
-    <div>
-      <div className="flex items-center justify-between gap-4 mb-1">
-        <SectionHeading eyebrowNum="05" title="Loop 計畫" />
-        <button onClick={toggleDone} className="shrink-0 text-xs border border-[#333B52] rounded-full px-3 py-1.5 flex items-center gap-1 text-[#A9AFC3] hover:text-[#F2EFE9] mt-1">
-          <Check size={13} className={done ? 'text-[#8FBF9F]' : ''} /> {done ? '已完成' : '標記完成'}
-        </button>
-      </div>
-      <p className="text-[#A9AFC3] max-w-[62ch] leading-relaxed -mt-4 mb-8">
-        和弦完成後，我們到 GarageBand 用 loop 把整首歌的氛圍做出來。<br />
-        開專案之前，先把下面的計畫寫下來——開 GB 時照著做，就不會在 loop 資料庫裡迷路。<br />
-        勾選後會自動存進你的帳號。
-      </p>
-
-      {/* 氛圍與速度 */}
-      <Panel className="mb-6">
-        <p className="text-sm text-[#A9AFC3] mb-3">1. 這首歌的氛圍</p>
-        <div className="flex flex-wrap gap-2 mb-5">
-          {LOOP_MOODS.map((m) => (
-            <button
-              key={m}
-              onClick={() => set({ mood: m })}
-              className={`px-4 py-2 rounded-md text-sm border transition-colors ${
-                plan.mood === m
-                  ? 'bg-[#E8A33D] text-[#1B1F2A] border-[#E8A33D]'
-                  : 'border-[#333B52] text-[#A9AFC3] hover:text-[#F2EFE9] hover:border-[#6B7285]'
-              }`}
-            >
-              {m}
-            </button>
-          ))}
-        </div>
-
-        <p className="text-sm text-[#A9AFC3] mb-3">2. 專案速度（開 GB 新專案時第一件事就設這個）</p>
-        <div className="flex items-center gap-4">
-          <input
-            type="range" min="60" max="160" value={plan.bpm}
-            onChange={(e) => set({ bpm: Number(e.target.value) })}
-            className="flex-1 max-w-xs accent-[#E8A33D]"
-          />
-          <span className="font-serif text-2xl text-[#F2EFE9]">{plan.bpm} <span className="text-sm text-[#A9AFC3]">BPM</span></span>
-        </div>
-        <p className="text-xs text-[#6B7285] mt-2">
-          不確定的話：抒情 70–90、輕快 100–120、搖滾 120–140、電子 120–130。
-        </p>
-      </Panel>
-
-      {/* 主歌 */}
-      <Panel className="mb-6">
-        <div className="flex items-baseline justify-between mb-1">
-          <p className="font-serif text-lg">3. 主歌：用哪些音軌？</p>
-          <span className="text-xs text-[#A9AFC3]">{layerLabels(plan.verse)}</span>
-        </div>
-        <p className="text-sm text-[#A9AFC3] mb-3">主歌要留白，通常 1–2 層就夠，讓歌詞說話。</p>
-        <div className="grid sm:grid-cols-2 gap-2">
-          {LOOP_LAYERS.map((l) => (
-            <LayerToggle key={l.id} layer={l} on={plan.verse.includes(l.id)} onToggle={() => toggleLayer('verse', l.id)} />
-          ))}
-        </div>
-      </Panel>
-
-      {/* 副歌 */}
-      <Panel className="mb-6">
-        <div className="flex items-baseline justify-between mb-1">
-          <p className="font-serif text-lg">4. 副歌：比主歌多什麼？</p>
-          <span className="text-xs text-[#A9AFC3]">{layerLabels(plan.chorus)}</span>
-        </div>
-        <p className="text-sm text-[#A9AFC3] mb-3">副歌要比主歌「厚」——比主歌多開 1–2 層，聽起來才會有「進副歌了」的感覺。</p>
-        <div className="grid sm:grid-cols-2 gap-2">
-          {LOOP_LAYERS.map((l) => (
-            <LayerToggle key={l.id} layer={l} on={plan.chorus.includes(l.id)} onToggle={() => toggleLayer('chorus', l.id)} />
-          ))}
-        </div>
-      </Panel>
-
-      {/* 備註 + 總結 */}
-      <Panel className="mb-6">
-        <p className="text-sm text-[#A9AFC3] mb-3">5. 備註（想特別記下的事：想找什麼音色、參考哪首歌…）</p>
-        <textarea
-          value={plan.note}
-          onChange={(e) => set({ note: e.target.value })}
-          rows={3}
-          placeholder="例如：副歌想找有拍手聲的鼓組；參考《XXX》的氛圍"
-          className="w-full bg-[#1F2430] border border-[#333B52] rounded-md px-3 py-2 text-sm text-[#F2EFE9] placeholder:text-[#6B7285] focus:border-[#E8A33D] outline-none resize-y"
-        />
-      </Panel>
-
-      <Panel>
-        <p className="text-sm text-[#A9AFC3] mb-3">你的 GarageBand 任務卡</p>
-        <div className="border border-[#333B52] rounded-md p-4 bg-[#1F2430] text-sm leading-relaxed space-y-2">
-          <p>🎵 新專案，速度設 <span className="text-[#E8A33D] font-medium">{plan.bpm} BPM</span>，氛圍：<span className="text-[#E8A33D] font-medium">{plan.mood}</span></p>
-          <p>🎼 主歌：{layerLabels(plan.verse)}</p>
-          <p>✨ 副歌：{layerLabels(plan.chorus)}</p>
-          {plan.note.trim() && <p className="text-[#A9AFC3]">📝 {plan.note}</p>}
-        </div>
-        <p className="text-xs text-[#A9AFC3] mt-3">
-          在 GarageBand 的 loop 資料庫（右上角 🌀）搜尋對應關鍵字，把 loop 拖到音軌上；
-          主歌先鋪 1–2 層，到副歌再把其他層打開。做完回來這裡點「標記完成」。
-        </p>
-        {savedMsg && <p className="text-xs text-[#8FBF9F] mt-2">{savedMsg}</p>}
-      </Panel>
-    </div>
-  );
-}
-
-/* ---------------------------------------------------------------- */
-/* 章節六：旋律寫作                                                     */
+/* 章節五：旋律寫作                                                     */
 /* ---------------------------------------------------------------- */
 
 function MelodyPage({
@@ -3006,7 +2824,7 @@ function MelodyPage({
   return (
     <div>
       <div className="flex items-center justify-between gap-4 mb-1">
-        <SectionHeading eyebrowNum="06" title="旋律寫作" />
+        <SectionHeading eyebrowNum="05" title="旋律寫作" />
         <button onClick={toggleDone} className="shrink-0 text-xs border border-[#333B52] rounded-full px-3 py-1.5 flex items-center gap-1 text-[#A9AFC3] hover:text-[#F2EFE9] mt-1">
           <Check size={13} className={done ? 'text-[#8FBF9F]' : ''} /> {done ? '已完成' : '標記完成'}
         </button>
@@ -3200,8 +3018,7 @@ function TeacherDashboard() {
       '自選歌曲', '自選歌曲-洗腦邏輯', '自選歌曲-歸類',
       '主題歌詞-組別', '主題歌詞-科目', '主題歌詞-章節', '主題歌詞-歌名', '主題歌詞-主歌', '主題歌詞-副歌',
       '和弦進行',
-      'Loop氛圍', 'Loop速度(BPM)', 'Loop主歌音軌', 'Loop副歌音軌', 'Loop備註',
-      '架構分析完成', '歌詞分析完成', '歌詞創作完成', '和弦完成', 'Loop完成', '旋律完成'
+      '架構分析完成', '歌詞分析完成', '歌詞創作完成', '和弦完成', '旋律完成'
     ];
 
     // 準備資料列
@@ -3211,9 +3028,6 @@ function TeacherDashboard() {
       const custom = s.lyricAnalysis?.custom || {};
       const subj = s.subjectLyrics || {};
       const progression = (s.progression || []).map((d) => chordSymbol(d)).join(' → ');
-      const lp = s.loopPlan || {};
-      const layerText = (ids) => Array.isArray(ids)
-        ? LOOP_LAYERS.filter((l) => ids.includes(l.id)).map((l) => l.label).join(' + ') : '';
 
       return [
         info.className || '',
@@ -3238,16 +3052,10 @@ function TeacherDashboard() {
         subj.verse || '',
         subj.chorus || '',
         progression,
-        lp.mood || '',
-        lp.bpm != null ? lp.bpm : '',
-        layerText(lp.verse),
-        layerText(lp.chorus),
-        lp.note || '',
         s.completed?.structure ? '✓' : '',
         s.completed?.['lyric-analysis'] ? '✓' : '',
         s.completed?.lyrics ? '✓' : '',
         s.completed?.chords ? '✓' : '',
-        s.completed?.loop ? '✓' : '',
         s.completed?.melody ? '✓' : '',
       ];
     });
