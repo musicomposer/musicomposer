@@ -364,15 +364,14 @@ const CHAPTERS = [
 ];
 
 /* ---------------------------------------------------------------- */
-/* 配器規劃：先定氛圍，再用「五層」概念規劃配器                          */
+/* 配器規劃：先定氛圍，再用「四層」概念規劃配器                          */
 /* ---------------------------------------------------------------- */
 
-// 五個角色：每個角色至少要有一個聲音
+// 四個角色：每個角色至少要有一個聲音（旋律由人聲自己錄，不列入）
 const ARR_LAYERS = [
   { id: 'rhythm', label: '節奏層', examples: '鼓、打擊樂', desc: '定整首歌的速度與律動，其他層都跟著它走。' },
   { id: 'bass', label: '低音層', examples: '貝斯', desc: '托住和弦的根音，讓歌有重量、有底。' },
   { id: 'harmony', label: '和聲層', examples: '鋼琴、吉他、Pad', desc: '鋪開你在和弦頁排好的進行，決定歌的顏色與厚薄。' },
-  { id: 'melody', label: '旋律層', examples: '主旋律、對旋律', desc: '帶走聽覺的那一條線；副歌可以多一條對旋律呼應。' },
   { id: 'deco', label: '裝飾層', examples: '氛圍音效、Riser、Fill', desc: '只在段落轉換處出現，推一把；主歌留白、副歌才加，效果最好。' },
 ];
 
@@ -380,7 +379,7 @@ const DEFAULT_ARR_PLAN = {
   mood: '',           // 形容詞（自由填寫）
   bpm: 90,
   reference: '',      // 參考曲目
-  layers: { rhythm: '', bass: '', harmony: '', melody: '', deco: '' },
+  layers: { rhythm: '', bass: '', harmony: '', deco: '' },
 };
 
 // 科目與章節資料
@@ -1425,7 +1424,7 @@ function OverviewPage({ completed, go }) {
     { id: 'lyric-analysis', title: '歌詞記憶分析', desc: '聽幾首洗腦金曲的副歌片段，感受什麼樣的歌詞和節奏最容易被記住。', icon: Headphones },
     { id: 'lyrics', title: '歌詞創作', desc: '從主題發想到押韻技巧，練習把想法變成能唱的句子。', icon: PenLine },
     { id: 'chords', title: '和弦進行', desc: '用互動和弦工具聽懂每個級數的情緒，動手排出自己的和弦進行。', icon: Guitar },
-    { id: 'arr', title: '配器規劃', desc: '先用形容詞定義整首歌的氛圍，再把編曲拆成五個角色，規劃每個角色要放什麼聲音。', icon: Layers },
+    { id: 'arr', title: '配器規劃', desc: '先用形容詞定義整首歌的氛圍，再把編曲拆成四個角色，規劃每個角色要放什麼聲音。', icon: Layers },
     { id: 'melody', title: '旋律寫作', desc: '在鋼琴捲軸上為你的和弦進行畫出第一條旋律線。', icon: Waves },
   ];
   return (
@@ -2869,7 +2868,7 @@ function ChordsPage({
 }
 
 /* ---------------------------------------------------------------- */
-/* 章節五：配器規劃（先定氛圍，再用「五層」概念規劃配器）                  */
+/* 章節五：配器規劃（先定氛圍，再用「四層」概念規劃配器）                  */
 /* ---------------------------------------------------------------- */
 
 function ArrangementPage({ plan, setPlan, done, toggleDone, onSave, savedMsg, progression, timeSig }) {
@@ -2898,7 +2897,7 @@ function ArrangementPage({ plan, setPlan, done, toggleDone, onSave, savedMsg, pr
       `【速度】${plan.bpm} BPM`,
       `【參考曲目】${plan.reference.trim() || '（未填）'}`,
       '',
-      '【五層配器】',
+      '【四層配器】',
       ...ARR_LAYERS.map((l) => `${l.label}：${(plan.layers[l.id] || '').trim() || '（未填）'}`),
     ];
     return lines.join('\n');
@@ -2928,7 +2927,7 @@ function ArrangementPage({ plan, setPlan, done, toggleDone, onSave, savedMsg, pr
         前面兩頁做完，你已經有和弦和旋律。這一步是<strong className="text-[#F2EFE9] font-normal">「先決定氛圍，再找聲音」</strong>——<br />
         先用幾個形容詞定義整首歌的感覺，再去 GarageBand 找 loop。這樣你找聲音時有判斷標準，
         而不是「這個好聽就放」。<br />
-        然後把編曲拆成五個角色，每個角色負責一件事。<strong className="text-[#F2EFE9] font-normal">「豐富」不等於很多軌</strong>，而是每一層各司其職。
+        然後把編曲拆成四個角色，每個角色負責一件事。<strong className="text-[#F2EFE9] font-normal">「豐富」不等於很多軌</strong>，而是每一層各司其職。
       </p>
 
       {/* 第一步：氛圍卡 */}
@@ -2965,22 +2964,22 @@ function ArrangementPage({ plan, setPlan, done, toggleDone, onSave, savedMsg, pr
               type="text"
               value={plan.reference}
               onChange={(e) => set({ reference: e.target.value })}
-              placeholder="找一首氛圍最像的歌，寫歌名＋歌手"
-              className="w-full bg-[#1F2430] border border-[#333B52] rounded-md px-3 py-2 text-sm text-[#F2EFE9] placeholder:text-[#6B7285] focus:border-[#E8A33D] outline-none"
+              className="w-full bg-[#1F2430] border border-[#333B52] rounded-md px-3 py-2 text-sm text-[#F2EFE9] focus:border-[#E8A33D] outline-none"
             />
             <p className="text-xs text-[#6B7285] mt-1.5">之後在 GB 找 loop 卡住時，回頭聽這首歌。</p>
           </div>
         </div>
       </Panel>
 
-      {/* 第二步：五層配器 */}
+      {/* 第二步：四層配器 */}
       <Panel className="mb-6">
         <div className="flex items-baseline justify-between mb-1">
-          <p className="font-serif text-lg">第二步：五個角色，各司其職</p>
+          <p className="font-serif text-lg">第二步：四個角色，各司其職</p>
           <span className="text-xs text-[#6B7285]">已填 {filledLayers.length} / {ARR_LAYERS.length} 層</span>
         </div>
         <p className="text-sm text-[#A9AFC3] mb-5">
-          每一層都寫下你要放什麼聲音。前四層是骨架，通常一首歌不能少；裝飾層只在段落轉換時出現，主歌留白、副歌才加。
+          每一層都寫下你要放什麼聲音。前三層是骨架，通常一首歌不能少；裝飾層只在段落轉換時出現，主歌留白、副歌才加。
+          主旋律不用樂器——那是你要自己錄的人聲。
         </p>
 
         {chordText && (
@@ -3008,8 +3007,7 @@ function ArrangementPage({ plan, setPlan, done, toggleDone, onSave, savedMsg, pr
                   type="text"
                   value={plan.layers[l.id] || ''}
                   onChange={(e) => setLayer(l.id, e.target.value)}
-                  placeholder={`我要用的${l.label.replace('層', '')}聲音是…`}
-                  className="w-full bg-[#1F2430] border border-[#333B52] rounded-md px-3 py-2 text-sm text-[#F2EFE9] placeholder:text-[#6B7285] focus:border-[#E8A33D] outline-none"
+                  className="w-full bg-[#1F2430] border border-[#333B52] rounded-md px-3 py-2 text-sm text-[#F2EFE9] focus:border-[#E8A33D] outline-none"
                 />
               </div>
             );
@@ -3283,7 +3281,7 @@ function TeacherDashboard() {
       '主題歌詞-組別', '主題歌詞-科目', '主題歌詞-章節', '主題歌詞-歌名', '主題歌詞-主歌', '主題歌詞-副歌',
       '和弦進行',
       '氛圍形容詞', '速度(BPM)', '參考曲目',
-      '節奏層', '低音層', '和聲層', '旋律層', '裝飾層',
+      '節奏層', '低音層', '和聲層', '裝飾層',
       '架構分析完成', '歌詞分析完成', '歌詞創作完成', '和弦完成', '配器完成', '旋律完成'
     ];
 
@@ -3329,7 +3327,6 @@ function TeacherDashboard() {
         apLayer('rhythm'),
         apLayer('bass'),
         apLayer('harmony'),
-        apLayer('melody'),
         apLayer('deco'),
         s.completed?.structure ? '✓' : '',
         s.completed?.['lyric-analysis'] ? '✓' : '',
