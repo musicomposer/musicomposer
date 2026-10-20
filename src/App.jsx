@@ -340,6 +340,8 @@ const TEACHING_IMAGES = [
   { src: 'images/chord-progressions.png', alt: '常用和弦進行 15634125 與 4536251' },
 ];
 
+const MIN_MEASURES = 8; // 主歌／副歌各至少 8 小節
+
 const PRESETS = [
   { name: '15634125', roman: 'C G Am Em F C Dm G', degrees: [0, 4, 5, 2, 3, 0, 1, 4], link: 'https://drive.google.com/file/d/1x9M1Pl-C5mmA9UwIbTKwj_xVS7i7gcO-/view' },
   { name: '4536251', roman: 'F G Em Am Dm G C', degrees: [3, 4, 2, 5, 1, 4, 0] },
@@ -623,10 +625,27 @@ export default function App() {
 
   const [page, setPage] = useState('overview');
   const [timeSig, setTimeSig] = useState('4/4'); // 拍號：每個和弦固定一個小節
-  const [progression, setProgression] = useState(
-    PRESETS[0].degrees.map((d) => ({ deg: d, beats: 4 })),
-  );
-  const [melody, setMelody] = useState(Array(PRESETS[0].degrees.length * 4).fill(null));
+  // 主歌／副歌各一段和弦＋旋律；MIN_MEASURES 是每段至少要有的小節數
+  const [song, setSong] = useState(() => ({
+    verse: { progression: PRESETS[0].degrees.map((d) => ({ deg: d, beats: 4 })), melody: [] },
+    chorus: { progression: [], melody: [] },
+  }));
+  const [activeSec, setActiveSec] = useState('verse'); // 目前在編輯哪一段
+  // 舊寫法的 progression / melody 就是「目前正在編輯的那一段」
+  const progression = song[activeSec].progression;
+  const melody = song[activeSec].melody;
+  function setProgression(next) {
+    setSong((s) => ({
+      ...s,
+      [activeSec]: { ...s[activeSec], progression: typeof next === 'function' ? next(s[activeSec].progression) : next },
+    }));
+  }
+  function setMelody(next) {
+    setSong((s) => ({
+      ...s,
+      [activeSec]: { ...s[activeSec], melody: typeof next === 'function' ? next(s[activeSec].melody) : next },
+    }));
+  }
   const [completed, setCompleted] = useState({});
   const [savedMsg, setSavedMsg] = useState('');
   const [copiedMsg, setCopiedMsg] = useState('');
@@ -688,7 +707,7 @@ export default function App() {
 
   function recordHistory() {
     stopPlayback(); // 動作前先停掉播放，避免排程跟畫面不同步
-    const snap = JSON.stringify({ progression, melody, timeSig });
+    const snap = JSON.stringify({ song, timeSig });
     const last = historyRef.current[historyRef.current.length - 1];
     if (last === snap) return; // 同一次動作不重複記錄
     historyRef.current.push(snap);
@@ -700,8 +719,7 @@ export default function App() {
     const snap = historyRef.current.pop();
     if (!snap) return;
     const prev = JSON.parse(snap);
-    setProgression(prev.progression);
-    setMelody(prev.melody);
+    setSong(prev.song);
     setTimeSig(prev.timeSig);
     setCanUndo(historyRef.current.length > 0);
   }
@@ -796,19 +814,32 @@ export default function App() {
         if (snap.exists()) {
           const data = snap.data();
           if (data.timeSig && tsDef(data.timeSig)) setTimeSig(data.timeSig);
-          const loadedProg = Array.isArray(data.progression) && data.progression.length
-            ? normalizeProgression(data.progression)
-            : null;
-          if (loadedProg) {
-            const sig = data.timeSig && tsDef(data.timeSig) ? data.timeSig : timeSig;
-            let m = Array.isArray(data.melody) ? data.melody : [];
-            const target = totalBeats(loadedProg);
+          const sig = data.timeSig && tsDef(data.timeSig) ? data.timeSig : '4/4';
+          // 載入一段進行＋旋律，修成每個小節都滿的
+          const loadOne = (rawProg, rawMel) => {
+            const loaded = Array.isArray(rawProg) && rawProg.length ? normalizeProgression(rawProg) : null;
+            if (!loaded) return null;
+            let m = Array.isArray(rawMel) ? rawMel : [];
+            const target = totalBeats(loaded);
             m = m.slice(0, target);
             while (m.length < target) m.push(null);
-            // 修成每個小節都滿的（舊資料可能有落單的半小節）
-            const repaired = repairHalves(loadedProg, m, sig);
-            setProgression(repaired.list);
-            setMelody(repaired.melody);
+            return repairHalves(loaded, m, sig);
+          };
+          if (data.song && data.song.verse) {
+            // 新格式：主歌／副歌各一段
+            const v = loadOne(data.song.verse.progression, data.song.verse.melody);
+            const c = loadOne(data.song.chorus?.progression, data.song.chorus?.melody);
+            setSong({
+              verse: v ? { progression: v.list, melody: v.melody } : { progression: [], melody: [] },
+              chorus: c ? { progression: c.list, melody: c.melody } : { progression: [], melody: [] },
+            });
+          } else if (Array.isArray(data.progression) && data.progression.length) {
+            // 舊格式：單一串 → 當作主歌，副歌留空
+            const legacy = loadOne(data.progression, data.melody);
+            setSong({
+              verse: legacy ? { progression: legacy.list, melody: legacy.melody } : { progression: [], melody: [] },
+              chorus: { progression: [], melody: [] },
+            });
           } else if (Array.isArray(data.melody)) {
             setMelody(data.melody);
           }
@@ -862,7 +893,7 @@ export default function App() {
     async (patch) => {
       if (!loadedRef.current || !user) return;
       try {
-        const payload = { progression, melody, timeSig, completed, lyricAnalysis, subjectLyrics, arrPlan, ...patch };
+        const payload = { song, timeSig, completed, lyricAnalysis, subjectLyrics, arrPlan, ...patch };
         await setDoc(doc(db, 'progress', user.uid), payload, { merge: true });
         setSavedMsg('已儲存');
         setTimeout(() => setSavedMsg(''), 1800);
@@ -871,7 +902,7 @@ export default function App() {
         setTimeout(() => setSavedMsg(''), 2200);
       }
     },
-    [user, progression, melody, timeSig, completed, lyricAnalysis, subjectLyrics, arrPlan]
+    [user, song, timeSig, completed, lyricAnalysis, subjectLyrics, arrPlan]
   );
 
   async function ensureAudio() {
@@ -1035,20 +1066,25 @@ export default function App() {
     recordHistory();
     const num = tsDef(nextSig).num;
     setTimeSig(nextSig);
-    // 每個和弦固定一個小節：重設拍數，並把旋律每段調整成新的格數
-    setProgression((prev) => prev.map((x) => (typeof x === 'number' ? { deg: x, beats: num } : { ...x, beats: num })));
-    setMelody((prev) => {
+    // 每個和弦固定一個小節：重設拍數，並把旋律每段調整成新的格數（主歌副歌都要）
+    setSong((prev) => ({
+      verse: resizeSection(prev.verse, num),
+      chorus: resizeSection(prev.chorus, num),
+    }));
+    function resizeSection(sec, beats) {
+      const list = (sec.progression || []).map((x) => (typeof x === 'number' ? { deg: x, beats } : { ...x, beats }));
+      const prevMel = sec.melody || [];
       const out = [];
       let off = 0;
-      progression.forEach((x) => {
+      list.forEach((x) => {
         const oldLen = beatsOf(x);
-        const seg = prev.slice(off, off + oldLen).slice(0, num);
-        while (seg.length < num) seg.push(null);
+        const seg = prevMel.slice(off, off + oldLen).slice(0, beats);
+        while (seg.length < beats) seg.push(null);
         out.push(...seg);
         off += oldLen;
       });
-      return out;
-    });
+      return { progression: list, melody: out };
+    }
   }
 
   function moveChord(from, to) {
@@ -1129,7 +1165,8 @@ export default function App() {
   }
 
   function copyChords() {
-    const text = progression.map((x) => chordSymbol(x)).join(' – ');
+    const line = (sec) => (song[sec].progression || []).map((x) => chordSymbol(x)).join(' – ');
+    const text = `主歌：${line('verse')}\n副歌：${line('chorus')}`;
     const done = () => {
       setCopiedMsg('已複製');
       setTimeout(() => setCopiedMsg(''), 1800);
@@ -1150,8 +1187,11 @@ export default function App() {
     });
   }
 
-  function playAll() {
-    if (!progression.length) return;
+  function playAll(secKey) {
+    const key = secKey || activeSec;
+    const prog = song[key].progression;
+    const mel = song[key].melody || [];
+    if (!prog.length) return;
     ensureAudio().then(() => {
       const tr = transport();
       releaseAllVoices(); // 從頭播：先放掉上一段還在響的音
@@ -1159,15 +1199,15 @@ export default function App() {
       tr.cancel(0);
       tr.position = 0;
       const dur = unitDur(timeSig); // 一格的秒數
-      const voiced = fullChordNotes(rootMidi, progression);
+      const voiced = fullChordNotes(rootMidi, prog);
       let chordCol = 0;
       voiced.forEach((notes, i) => {
-        const beats = beatsOf(progression[i]);
+        const beats = beatsOf(prog[i]);
         const t = 0.05 + chordCol * dur;
         tr.schedule((time) => playNotes(notes.map(midiToNote), beats * dur * 1.1, time), t);
         chordCol += beats;
       });
-      melody.forEach((deg, col) => {
+      mel.forEach((deg, col) => {
         if (deg == null) return;
         const t = 0.05 + col * dur;
         tr.schedule((time) => {
@@ -1176,7 +1216,7 @@ export default function App() {
           else synthRef.current.triggerAttackRelease(note, dur * 0.85, time);
         }, t);
       });
-      const totalCols = totalBeats(progression);
+      const totalCols = totalBeats(prog);
       playbackRef.current = { dur, totalCols };
       setIsPlaying(true);
       setIsPaused(false);
@@ -1215,7 +1255,31 @@ export default function App() {
   function restartPlayback() {
     if (!progression.length) return;
     stopPlayback();
-    playAll();
+    playAll(activeSec);
+  }
+
+  // 播放指定段落（主歌／副歌）
+  function playSection(sec) {
+    stopPlayback();
+    playAll(sec);
+  }
+
+  // 切換目前編輯的段落（主歌／副歌）
+  function switchSection(sec) {
+    if (sec === activeSec) return;
+    stopPlayback();
+    setActiveSec(sec);
+  }
+
+  // 匯出 MIDI：主歌＋副歌接在一起
+  function onExportMidi() {
+    const num = tsDef(timeSig).num;
+    const prog = [
+      ...song.verse.progression,
+      ...song.chorus.progression.map((x) => (typeof x === 'number' ? { deg: x, beats: num } : x)),
+    ];
+    const mel = [...(song.verse.melody || []), ...(song.chorus.melody || [])];
+    downloadMidi(rootMidi, prog, mel, timeSig);
   }
 
   // 停止並回到開頭（換內容時用）
@@ -1396,9 +1460,13 @@ export default function App() {
             toggleDone={() => toggleComplete('chords')}
             onSave={() => persist({})}
             savedMsg={savedMsg}
-            onExportMidi={() => downloadMidi(rootMidi, progression, melody, timeSig)}
+            onExportMidi={onExportMidi}
             onCopyChords={copyChords}
             copiedMsg={copiedMsg}
+            song={song}
+            activeSec={activeSec}
+            onSwitchSec={switchSection}
+            playSec={playSection}
           />
         )}
 
@@ -1431,9 +1499,13 @@ export default function App() {
             toggleDone={() => toggleComplete('melody')}
             onSave={() => persist({})}
             savedMsg={savedMsg}
-            onExportMidi={() => downloadMidi(rootMidi, progression, melody, timeSig)}
+            onExportMidi={onExportMidi}
             onUndo={undo}
             canUndo={canUndo}
+            song={song}
+            activeSec={activeSec}
+            onSwitchSec={switchSection}
+            playSec={playSection}
           />
         )}
 
@@ -2323,6 +2395,7 @@ function ChordsPage({
   removeFromProgression, timeSig, changeTimeSig, insertSecondHalf, insertChordAt, pullOutToNewMeasure, moveChord, moveChordIntoSecondHalf,
   loadPreset, playAll, restartPlay, isPlaying, isPaused, done, toggleDone, onSave, savedMsg,
   onExportMidi, onCopyChords, copiedMsg, onUndo, canUndo,
+  song, activeSec, onSwitchSec, playSec,
 }) {
   const [zoomImg, setZoomImg] = useState(null);
   const [dragIdx, setDragIdx] = useState(null);        // 進行中和弦的拖曳來源
@@ -2726,8 +2799,36 @@ function ChordsPage({
       </Panel>
 
       <Panel>
+        {/* 主歌／副歌分頁 */}
+        <div className="flex items-center gap-2 mb-4 border-b border-[#333B52]">
+          {[
+            { key: 'verse', label: '主歌', hint: '說故事的段落，能量較低' },
+            { key: 'chorus', label: '副歌', hint: '記憶點，能量最高' },
+          ].map((sec) => {
+            const prog = song[sec.key].progression || [];
+            const n = Math.round(totalBeats(prog) / beatsPerBar);
+            const active = activeSec === sec.key;
+            return (
+              <button
+                key={sec.key}
+                onClick={() => onSwitchSec(sec.key)}
+                title={sec.hint}
+                className={`px-4 py-2.5 text-sm border-b-2 -mb-px transition-colors ${
+                  active
+                    ? 'border-[#E8A33D] text-[#F2EFE9]'
+                    : 'border-transparent text-[#A9AFC3] hover:text-[#F2EFE9]'
+                }`}
+              >
+                {sec.label}
+                <span className={`ml-2 text-xs ${n >= MIN_MEASURES ? 'text-[#8FBF9F]' : 'text-[#6B7285]'}`}>
+                  {n}/{MIN_MEASURES} 小節
+                </span>
+              </button>
+            );
+          })}
+        </div>
         <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
-          <p className="text-sm text-[#A9AFC3]">我的和弦進行</p>
+          <p className="text-sm text-[#A9AFC3]">我的和弦進行 — {activeSec === 'verse' ? '主歌' : '副歌'}</p>
           <div className="flex items-center gap-2">
             <label htmlFor="time-sig" className="text-xs text-[#A9AFC3]">拍號</label>
             <select
@@ -2754,7 +2855,7 @@ function ChordsPage({
             onDragOver={(e) => e.preventDefault()}
             onDrop={html5Drop}
           >
-            還沒有和弦，點上面的和弦按鈕，或直接把和弦拖進來開始建立吧。
+            還沒有和弦，點上面的和弦按鈕，或直接把和弦拖進來開始建立吧。這一段至少要 {MIN_MEASURES} 小節。
           </p>
         ) : (
           <>
@@ -2859,19 +2960,26 @@ function ChordsPage({
         )}
         <div className="flex flex-wrap gap-3">
           <button
-            onClick={playAll}
-            disabled={!progression.length}
+            onClick={() => playSec('verse')}
+            disabled={!song.verse.progression.length}
             className="inline-flex items-center gap-2 bg-[#E8A33D] text-[#1B1F2A] font-medium rounded-md px-4 py-2 text-sm disabled:opacity-40"
           >
-            {isPlaying ? <><Pause size={15} /> 暫停</> : isPaused ? <><Play size={15} /> 繼續</> : <><Play size={15} /> 播放進行</>}
+            <Play size={15} /> 播放主歌
           </button>
           <button
-            onClick={restartPlay}
+            onClick={() => playSec('chorus')}
+            disabled={!song.chorus.progression.length}
+            className="inline-flex items-center gap-2 bg-[#6FA8DC] text-[#1B1F2A] font-medium rounded-md px-4 py-2 text-sm disabled:opacity-40"
+          >
+            <Play size={15} /> 播放副歌
+          </button>
+          <button
+            onClick={isPlaying || isPaused ? playAll : restartPlay}
             disabled={!progression.length}
-            title="回到第一小節，從頭播放"
+            title={activeSec === 'verse' ? '主歌' : '副歌'}
             className="inline-flex items-center gap-2 border border-[#333B52] rounded-md px-4 py-2 text-sm text-[#A9AFC3] hover:text-[#F2EFE9] hover:border-[#E8A33D] disabled:opacity-40"
           >
-            <SkipBack size={15} /> 從頭播放
+            {isPlaying ? <><Pause size={15} /> 暫停</> : isPaused ? <><Play size={15} /> 繼續</> : <><SkipBack size={15} /> 從頭播放這段</>}
           </button>
           <button
             onClick={onUndo}
@@ -3123,8 +3231,10 @@ function ArrangementPage({ plan, setPlan, done, toggleDone, onSave, savedMsg, pr
 function MelodyPage({
   progression, melody, timeSig, toggleMelodyCell, playAll, restartPlay, isPlaying, isPaused, playheadCol,
   goToChords, done, toggleDone, onSave, savedMsg, onExportMidi, onUndo, canUndo,
+  song, activeSec, onSwitchSec, playSec,
 }) {
   const rows = [7, 6, 5, 4, 3, 2, 1, 0]; // extended degrees, high to low
+  const beatsPerBar = tsDef(timeSig).num;
 
   return (
     <div>
@@ -3138,6 +3248,31 @@ function MelodyPage({
         在格子上點選音高，畫出你的旋律線。淺色格子是這個和弦裡的「和弦音」，通常唱起來最穩定；
         用其他音當作經過音，可以讓旋律更有變化。
       </p>
+
+      {/* 主歌／副歌分頁 */}
+      <div className="flex items-center gap-2 mb-5 border-b border-[#333B52]">
+        {[
+          { key: 'verse', label: '主歌旋律' },
+          { key: 'chorus', label: '副歌旋律' },
+        ].map((sec) => {
+          const n = Math.round(totalBeats(song[sec.key].progression || []) / beatsPerBar);
+          const active = activeSec === sec.key;
+          return (
+            <button
+              key={sec.key}
+              onClick={() => onSwitchSec(sec.key)}
+              className={`px-4 py-2.5 text-sm border-b-2 -mb-px transition-colors ${
+                active ? 'border-[#E8A33D] text-[#F2EFE9]' : 'border-transparent text-[#A9AFC3] hover:text-[#F2EFE9]'
+              }`}
+            >
+              {sec.label}
+              <span className={`ml-2 text-xs ${n >= MIN_MEASURES ? 'text-[#8FBF9F]' : 'text-[#6B7285]'}`}>
+                {n} 小節
+              </span>
+            </button>
+          );
+        })}
+      </div>
 
       {progression.length === 0 ? (
         <Panel>
@@ -3388,7 +3523,7 @@ function TeacherDashboard({ onExit }) {
       ...songHeaders,
       '自選歌曲', '自選歌曲-洗腦邏輯', '自選歌曲-歸類',
       '主題歌詞-組別', '主題歌詞-科目', '主題歌詞-章節', '主題歌詞-歌名', '主題歌詞-主歌', '主題歌詞-副歌',
-      '和弦進行',
+      '主歌和弦進行', '主歌小節數', '副歌和弦進行', '副歌小節數',
       '氛圍形容詞', '速度(BPM)', '參考曲目',
       '節奏層', '低音層', '和聲層', '裝飾層',
       '架構分析完成', '歌詞分析完成', '歌詞創作完成', '和弦完成', '配器完成', '旋律完成'
@@ -3400,7 +3535,16 @@ function TeacherDashboard({ onExit }) {
       const entries = s.lyricAnalysis?.entries || [];
       const custom = s.lyricAnalysis?.custom || {};
       const subj = s.subjectLyrics || {};
-      const progression = (s.progression || []).map((d) => chordSymbol(d)).join(' → ');
+      const progression = [
+        ...(s.song?.verse?.progression || s.progression || []),
+      ].map((d) => chordSymbol(d)).join(' → ');
+      const chorusProg = (s.song?.chorus?.progression || []).map((d) => chordSymbol(d)).join(' → ');
+      const measureCount = (sec) => {
+        const p = sec && Array.isArray(sec) ? sec : [];
+        return p.length ? Math.round(p.reduce((a, x) => a + beatsOf(x), 0) / tsDef(s.timeSig || '4/4').num) : 0;
+      };
+      const verseMeasures = measureCount(s.song?.verse?.progression || s.progression);
+      const chorusMeasures = measureCount(s.song?.chorus?.progression);
       const ap = s.arrPlan || {};
       const apMood = typeof ap.mood === 'string'
         ? ap.mood
@@ -3426,6 +3570,9 @@ function TeacherDashboard({ onExit }) {
         subj.verse || '',
         subj.chorus || '',
         progression,
+        verseMeasures || '',
+        chorusProg,
+        chorusMeasures || '',
         apMood,
         ap.bpm != null ? ap.bpm : '',
         ap.reference || '',
@@ -3587,13 +3734,15 @@ function TeacherDashboard({ onExit }) {
     }
 
     if (tab === 'chords') {
+      const line = (sec) => (sec && sec.length ? sec.map((d) => chordSymbol(d)).join(' → ') : '');
+      const v = s.song?.verse?.progression || s.progression || [];
+      const c = s.song?.chorus?.progression || [];
+      const n = (p) => (p.length ? Math.round(totalBeats(p) / tsDef(s.timeSig || '4/4').num) : 0);
       return (
-        <div className="bg-[#1F2430] rounded p-2.5 space-y-1.5">
+        <div className="bg-[#1F2430] rounded p-2.5 space-y-2">
           <DashRow label="拍號" value={s.timeSig || '4/4'} />
-          <DashRow
-            label="和弦進行"
-            value={(s.progression || []).length ? s.progression.map((d) => chordSymbol(d)).join(' → ') : ''}
-          />
+          <DashRow label={`主歌（${n(v)} 小節）`} value={line(v)} />
+          <DashRow label={`副歌（${n(c)} 小節）`} value={line(c)} />
         </div>
       );
     }
@@ -3610,10 +3759,24 @@ function TeacherDashboard({ onExit }) {
     }
 
     if (tab === 'melody') {
+      const v = s.song?.verse?.progression || s.progression || [];
+      const c = s.song?.chorus?.progression || [];
+      const vMel = s.song?.verse?.melody || s.melody || [];
+      const cMel = s.song?.chorus?.melody || [];
+      const textOf = (prog, mel) => {
+        if (!mel.some((d) => d != null)) return '';
+        const per = tsDef(s.timeSig || '4/4').num;
+        const toks = mel.map((d) => (d == null ? '·' : midiToNote(extendedDegreeMidi(60, d))));
+        const bars = [];
+        for (let i = 0; i < toks.length; i += per) bars.push(toks.slice(i, i + per).join(' '));
+        return bars.join(' ｜ ');
+      };
       return (
-        <div className="bg-[#1F2430] rounded p-2.5 space-y-1.5">
-          <DashRow label="和弦" value={(s.progression || []).map((d) => chordSymbol(d)).join(' → ')} />
-          <DashRow label="旋律" value={melodyText} />
+        <div className="bg-[#1F2430] rounded p-2.5 space-y-2">
+          <DashRow label="主歌和弦" value={v.map((d) => chordSymbol(d)).join(' → ')} />
+          <DashRow label="主歌旋律" value={textOf(v, vMel)} />
+          <DashRow label="副歌和弦" value={c.map((d) => chordSymbol(d)).join(' → ')} />
+          <DashRow label="副歌旋律" value={textOf(c, cMel)} />
         </div>
       );
     }
