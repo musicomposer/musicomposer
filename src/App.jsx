@@ -649,6 +649,7 @@ export default function App() {
   const [completed, setCompleted] = useState({});
   const [savedMsg, setSavedMsg] = useState('');
   const [copiedMsg, setCopiedMsg] = useState('');
+  const [metronomeOn, setMetronomeOn] = useState(false); // 節拍器（配器頁抓速度用）
   const [isPlaying, setIsPlaying] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [playheadCol, setPlayheadCol] = useState(-1);
@@ -683,6 +684,7 @@ export default function App() {
   const loadedRef = useRef(false);
   const playheadTimerRef = useRef(null);   // 播放進度計時器
   const playbackRef = useRef(null);        // 本次播放的 { dur, totalCols }
+  const metroLoopRef = useRef(null);       // 節拍器的排程事件 id
 
   function transport() {
     return (Tone.getTransport && Tone.getTransport()) || Tone.Transport;
@@ -1192,6 +1194,7 @@ export default function App() {
     const prog = song[key].progression;
     const mel = song[key].melody || [];
     if (!prog.length) return;
+    if (metronomeOn) stopMetronome(); // 節拍器跟播放共用 Transport
     ensureAudio().then(() => {
       const tr = transport();
       releaseAllVoices(); // 從頭播：先放掉上一段還在響的音
@@ -1263,6 +1266,47 @@ export default function App() {
     stopPlayback();
     playAll(sec);
   }
+
+  // ---- 節拍器：配器頁用來抓速度（重音在每小節第一拍）----
+  function stopMetronome() {
+    const tr = transport();
+    if (metroLoopRef.current != null) {
+      try { tr.clear(metroLoopRef.current); } catch (e) { /* noop */ }
+      metroLoopRef.current = null;
+    }
+    try { tr.stop(); tr.cancel(0); } catch (e) { /* noop */ }
+    releaseAllVoices();
+    setMetronomeOn(false);
+  }
+
+  function toggleMetronome(bpm) {
+    if (metronomeOn) { stopMetronome(); return; }
+    ensureAudio().then(() => {
+      stopPlayback(); // 跟和弦播放共用 Transport，先停掉
+      const tr = transport();
+      tr.stop();
+      tr.cancel(0);
+      tr.position = 0;
+      tr.bpm.value = Number(bpm) || 90;
+      const perBar = tsDef(timeSig).num;
+      let beat = 0;
+      metroLoopRef.current = tr.scheduleRepeat((time) => {
+        const accent = beat % perBar === 0;
+        if (synthRef.current) {
+          synthRef.current.triggerAttackRelease(accent ? 'C6' : 'A5', 0.03, time, accent ? 1 : 0.5);
+        }
+        beat += 1;
+      }, '4n');
+      tr.start();
+      setMetronomeOn(true);
+    });
+  }
+
+  // 節拍器播放中，拉 BPM 滑桿要即時改變快慢
+  useEffect(() => {
+    if (!metronomeOn) return;
+    transport().bpm.value = Number(arrPlan.bpm) || 90;
+  }, [arrPlan.bpm, metronomeOn]);
 
   // 切換目前編輯的段落（主歌／副歌）
   function switchSection(sec) {
@@ -1480,6 +1524,9 @@ export default function App() {
             savedMsg={savedMsg}
             progression={progression}
             timeSig={timeSig}
+            song={song}
+            metronomeOn={metronomeOn}
+            toggleMetronome={toggleMetronome}
           />
         )}
 
@@ -3022,7 +3069,10 @@ function ChordsPage({
 /* 章節五：配器規劃（先定氛圍，再用「四層」概念規劃配器）                  */
 /* ---------------------------------------------------------------- */
 
-function ArrangementPage({ plan, setPlan, done, toggleDone, onSave, savedMsg, progression, timeSig }) {
+function ArrangementPage({
+  plan, setPlan, done, toggleDone, onSave, savedMsg, progression, timeSig,
+  song, metronomeOn, toggleMetronome,
+}) {
   const onSaveRef = useRef(onSave);
   onSaveRef.current = onSave;
   const firstRenderRef = useRef(true);
@@ -3064,7 +3114,10 @@ function ArrangementPage({ plan, setPlan, done, toggleDone, onSave, savedMsg, pr
     }
   }
 
-  const chordText = (progression || []).map((d) => chordSymbol(d)).join(' – ');
+  const progLine = (sec) => ((song?.[sec]?.progression || []).map((d) => chordSymbol(d)).join(' – '));
+  const verseText = progLine('verse');
+  const chorusText = progLine('chorus');
+  const hasChords = Boolean(verseText || chorusText);
 
   return (
     <div>
@@ -3098,7 +3151,21 @@ function ArrangementPage({ plan, setPlan, done, toggleDone, onSave, savedMsg, pr
 
         <div className="grid md:grid-cols-2 gap-5">
           <div>
-            <p className="text-sm text-[#A9AFC3] mb-2">速度（BPM）</p>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-sm text-[#A9AFC3]">速度（BPM）</p>
+              <button
+                onClick={() => toggleMetronome(plan.bpm)}
+                title={metronomeOn ? '停止節拍器' : '用目前的 BPM 聽節拍器'}
+                className={`inline-flex items-center gap-1.5 text-xs border rounded-md px-2.5 py-1.5 transition-colors ${
+                  metronomeOn
+                    ? 'border-[#E8A33D] text-[#E8A33D] bg-[#E8A33D]/10'
+                    : 'border-[#333B52] text-[#A9AFC3] hover:text-[#E8A33D] hover:border-[#E8A33D]'
+                }`}
+              >
+                {metronomeOn ? <Pause size={13} /> : <Play size={13} />}
+                {metronomeOn ? '停止節拍器' : '聽節拍器'}
+              </button>
+            </div>
             <div className="flex items-center gap-4">
               <input
                 type="range" min="60" max="180" value={plan.bpm}
@@ -3107,7 +3174,7 @@ function ArrangementPage({ plan, setPlan, done, toggleDone, onSave, savedMsg, pr
               />
               <span className="font-serif text-2xl text-[#F2EFE9] w-20 text-right">{plan.bpm}<span className="text-xs text-[#A9AFC3] ml-1">BPM</span></span>
             </div>
-            <p className="text-xs text-[#6B7285] mt-1.5">抒情 70–90、輕快 100–120、搖滾 120–140、電子 120–130。</p>
+            <p className="text-xs text-[#6B7285] mt-1.5">抒情 70–90、輕快 100–120、搖滾 120–140、電子 120–130。拉滑桿時節拍器會即時跟著變快慢。</p>
           </div>
           <div>
             <p className="text-sm text-[#A9AFC3] mb-2">參考曲目</p>
@@ -3133,11 +3200,21 @@ function ArrangementPage({ plan, setPlan, done, toggleDone, onSave, savedMsg, pr
           主旋律不用樂器——那是你要自己錄的人聲。
         </p>
 
-        {chordText && (
-          <div className="border border-[#333B52] rounded-md px-4 py-3 mb-5 bg-[#1F2430]">
-            <span className="text-xs text-[#6B7285]">你的和弦進行（{timeSig}）：</span>
-            <span className="text-sm text-[#E8A33D] ml-2">{chordText}</span>
-            <span className="text-xs text-[#6B7285] ml-2">— 和聲層就要鋪這串</span>
+        {hasChords && (
+          <div className="border border-[#333B52] rounded-md px-4 py-3 mb-5 bg-[#1F2430] space-y-2">
+            <p className="text-xs text-[#6B7285]">你的和弦進行（{timeSig}）— 和聲層就要鋪這兩段</p>
+            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              <span className="text-xs text-[#6B7285] shrink-0">主歌</span>
+              {verseText
+                ? <span className="text-sm text-[#E8A33D]">{verseText}</span>
+                : <span className="text-sm text-[#5B6178]">還沒有和弦</span>}
+            </div>
+            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              <span className="text-xs text-[#6B7285] shrink-0">副歌</span>
+              {chorusText
+                ? <span className="text-sm text-[#E8A33D]">{chorusText}</span>
+                : <span className="text-sm text-[#5B6178]">還沒有和弦</span>}
+            </div>
           </div>
         )}
 
