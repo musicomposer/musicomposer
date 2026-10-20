@@ -366,15 +366,15 @@ const CHAPTERS = [
 ];
 
 /* ---------------------------------------------------------------- */
-/* 配器規劃：先定氛圍，再用「四層」概念規劃配器                          */
+/* 配器規劃：先定氛圍，再用「四軌」概念規劃配器                          */
 /* ---------------------------------------------------------------- */
 
 // 四個角色：每個角色至少要有一個聲音（旋律由人聲自己錄，不列入）
 const ARR_LAYERS = [
-  { id: 'rhythm', label: '節奏層', examples: '鼓、打擊樂', desc: '定整首歌的速度與律動，其他層都跟著它走。' },
-  { id: 'bass', label: '低音層', examples: '貝斯', desc: '托住和弦的根音，讓歌有重量、有底。' },
-  { id: 'harmony', label: '和聲層', examples: '鋼琴、吉他、Pad', desc: '鋪開你在和弦頁排好的進行，決定歌的顏色與厚薄。' },
-  { id: 'deco', label: '裝飾層', examples: '氛圍音效、Riser、Fill', desc: '只在段落轉換處出現，推一把；主歌留白、副歌才加，效果最好。' },
+  { id: 'rhythm', label: '節奏軌', examples: '鼓、打擊樂', desc: '定整首歌的速度與律動，其他軌都跟著它走。' },
+  { id: 'bass', label: '低音軌', examples: '貝斯', desc: '托住和弦的根音，讓歌有重量、有底。' },
+  { id: 'harmony', label: '和聲軌', examples: '鋼琴、吉他、Pad', desc: '鋪開你在和弦頁排好的進行，決定歌的顏色與厚薄。' },
+  { id: 'deco', label: '裝飾軌', examples: '氛圍音效、Riser、Fill', desc: '只在段落轉換處出現，推一把；主歌留白、副歌才加，效果最好。' },
 ];
 
 const DEFAULT_ARR_PLAN = {
@@ -685,6 +685,7 @@ export default function App() {
   const playheadTimerRef = useRef(null);   // 播放進度計時器
   const playbackRef = useRef(null);        // 本次播放的 { dur, totalCols }
   const metroLoopRef = useRef(null);       // 節拍器的排程事件 id
+  const metroSynthRef = useRef(null);      // 節拍器專用（木魚聲）
 
   function transport() {
     return (Tone.getTransport && Tone.getTransport()) || Tone.Transport;
@@ -772,6 +773,14 @@ export default function App() {
       envelope: { attack: 0.005, decay: 0.1, sustain: 0.2, release: 0.3 },
     }).toDestination();
     synthRef.current.volume.value = -4;
+
+    // 節拍器專用：木魚聲（短促的敲擊＋一點音高下滑）
+    metroSynthRef.current = new Tone.MembraneSynth({
+      pitchDecay: 0.008,
+      octaves: 2,
+      envelope: { attack: 0.001, decay: 0.06, sustain: 0, release: 0.02 },
+    }).toDestination();
+    metroSynthRef.current.volume.value = -6;
 
     try {
       pianoRef.current = new Tone.Sampler({
@@ -1292,8 +1301,11 @@ export default function App() {
       let beat = 0;
       metroLoopRef.current = tr.scheduleRepeat((time) => {
         const accent = beat % perBar === 0;
-        if (synthRef.current) {
-          synthRef.current.triggerAttackRelease(accent ? 'C6' : 'A5', 0.03, time, accent ? 1 : 0.5);
+        if (metroSynthRef.current) {
+          // 木魚聲：重音較高且大聲，其餘拍較低且小聲
+          metroSynthRef.current.triggerAttackRelease(
+            accent ? 'C5' : 'G4', 0.03, time, accent ? 1 : 0.55,
+          );
         }
         beat += 1;
       }, '4n');
@@ -3066,7 +3078,7 @@ function ChordsPage({
 }
 
 /* ---------------------------------------------------------------- */
-/* 章節五：配器規劃（先定氛圍，再用「四層」概念規劃配器）                  */
+/* 章節五：配器規劃（先定氛圍，再用「四軌」概念規劃配器）                  */
 /* ---------------------------------------------------------------- */
 
 function ArrangementPage({
@@ -3098,7 +3110,7 @@ function ArrangementPage({
       `【速度】${plan.bpm} BPM`,
       `【參考曲目】${plan.reference.trim() || '（未填）'}`,
       '',
-      '【四層配器】',
+      '【四軌配器】',
       ...ARR_LAYERS.map((l) => `${l.label}：${(plan.layers[l.id] || '').trim() || '（未填）'}`),
     ];
     return lines.join('\n');
@@ -3131,7 +3143,7 @@ function ArrangementPage({
         前面兩頁做完，你已經有和弦和旋律。這一步是<strong className="text-[#F2EFE9] font-normal">「先決定氛圍，再找聲音」</strong>——<br />
         先用幾個形容詞定義整首歌的感覺，再去 GarageBand 找 loop。這樣你找聲音時有判斷標準，
         而不是「這個好聽就放」。<br />
-        然後把編曲拆成四個角色，每個角色負責一件事。<strong className="text-[#F2EFE9] font-normal">「豐富」不等於很多軌</strong>，而是每一層各司其職。
+        然後把編曲拆成四個角色，每個角色負責一件事。<strong className="text-[#F2EFE9] font-normal">「豐富」不等於很多軌</strong>，而是每一軌各司其職。
       </p>
 
       {/* 第一步：氛圍卡 */}
@@ -3189,20 +3201,20 @@ function ArrangementPage({
         </div>
       </Panel>
 
-      {/* 第二步：四層配器 */}
+      {/* 第二步：四軌配器 */}
       <Panel className="mb-6">
         <div className="flex items-baseline justify-between mb-1">
           <p className="font-serif text-lg">第二步：四個角色，各司其職</p>
-          <span className="text-xs text-[#6B7285]">已填 {filledLayers.length} / {ARR_LAYERS.length} 層</span>
+          <span className="text-xs text-[#6B7285]">已填 {filledLayers.length} / {ARR_LAYERS.length} 軌</span>
         </div>
         <p className="text-sm text-[#A9AFC3] mb-5">
-          每一層都寫下你要放什麼聲音。前三層是骨架，通常一首歌不能少；裝飾層只在段落轉換時出現，主歌留白、副歌才加。
+          每一軌都寫下你要放什麼聲音。前三軌是骨架，通常一首歌不能少；裝飾軌只在段落轉換時出現，主歌留白、副歌才加。
           主旋律不用樂器——那是你要自己錄的人聲。
         </p>
 
         {hasChords && (
           <div className="border border-[#333B52] rounded-md px-4 py-3 mb-5 bg-[#1F2430] space-y-2">
-            <p className="text-xs text-[#6B7285]">你的和弦進行（{timeSig}）— 和聲層就要鋪這兩段</p>
+            <p className="text-xs text-[#6B7285]">你的和弦進行（{timeSig}）— 和聲軌就要鋪這兩段</p>
             <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
               <span className="text-xs text-[#6B7285] shrink-0">主歌</span>
               {verseText
@@ -3292,8 +3304,8 @@ function ArrangementPage({
         </div>
 
         <p className="text-xs text-[#A9AFC3] mt-4 leading-relaxed">
-          接下來到 GarageBand：開新專案、把速度設成 {plan.bpm} BPM，照著這張表一層一層把 loop 拖進去。
-          先開節奏層對齊，再補和聲與低音，旋律最後疊。做完回來這裡點「標記完成」。
+          接下來到 GarageBand：開新專案、把速度設成 {plan.bpm} BPM，照著這張表一軌一軌把 loop 拖進去。
+          先開節奏軌對齊，再補和聲與低音，旋律最後疊。做完回來這裡點「標記完成」。
         </p>
         {savedMsg && <p className="text-xs text-[#8FBF9F] mt-2">{savedMsg}</p>}
       </Panel>
@@ -3602,7 +3614,7 @@ function TeacherDashboard({ onExit }) {
       '主題歌詞-組別', '主題歌詞-科目', '主題歌詞-章節', '主題歌詞-歌名', '主題歌詞-主歌', '主題歌詞-副歌',
       '主歌和弦進行', '主歌小節數', '副歌和弦進行', '副歌小節數',
       '氛圍形容詞', '速度(BPM)', '參考曲目',
-      '節奏層', '低音層', '和聲層', '裝飾層',
+      '節奏軌', '低音軌', '和聲軌', '裝飾軌',
       '架構分析完成', '歌詞分析完成', '歌詞創作完成', '和弦完成', '配器完成', '旋律完成'
     ];
 
