@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import * as Tone from 'tone';
-import { Music, ListMusic, PenLine, Guitar, Waves, Play, Pause, SkipBack, Save, Check, X, Download, LogOut, ExternalLink, Headphones, Copy, Undo2 } from 'lucide-react';
+import { Music, ListMusic, PenLine, Guitar, Waves, Play, Pause, SkipBack, Save, Check, X, Download, LogOut, ExternalLink, Headphones, Copy, Undo2, Layers } from 'lucide-react';
 import { auth, googleProvider, db } from './firebase';
 import { onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth';
 import { doc, getDoc, setDoc, collection, getDocs } from 'firebase/firestore';
@@ -359,8 +359,36 @@ const CHAPTERS = [
   { id: 'lyric-analysis', label: '歌詞記憶分析', icon: Headphones },
   { id: 'lyrics', label: '歌詞創作', icon: PenLine },
   { id: 'chords', label: '和弦進行', icon: Guitar },
+  { id: 'arr', label: '配器規劃', icon: Layers },
   { id: 'melody', label: '旋律寫作', icon: Waves },
 ];
+
+/* ---------------------------------------------------------------- */
+/* 配器規劃：先定氛圍，再用「五層」概念規劃配器                          */
+/* ---------------------------------------------------------------- */
+
+// 氛圍形容詞（學生點選或自己補一個詞）
+const ARR_MOODS = [
+  '溫暖', '孤單', '緊張', '慵懶', '明亮', '憂傷',
+  '熱血', '夢幻', '神祕', '俏皮', '懷舊', '遼闊',
+];
+
+// 五個角色：每個角色至少要有一個聲音
+const ARR_LAYERS = [
+  { id: 'rhythm', label: '節奏層', examples: '鼓、打擊樂', desc: '定整首歌的速度與律動，其他層都跟著它走。' },
+  { id: 'bass', label: '低音層', examples: '貝斯', desc: '托住和弦的根音，讓歌有重量、有底。' },
+  { id: 'harmony', label: '和聲層', examples: '鋼琴、吉他、Pad', desc: '鋪開你在和弦頁排好的進行，決定歌的顏色與厚薄。' },
+  { id: 'melody', label: '旋律層', examples: '主旋律、對旋律', desc: '帶走聽覺的那一條線；副歌可以多一條對旋律呼應。' },
+  { id: 'deco', label: '裝飾層', examples: '氛圍音效、Riser、Fill', desc: '只在段落轉換處出現，推一把；主歌留白、副歌才加，效果最好。' },
+];
+
+const DEFAULT_ARR_PLAN = {
+  mood: [],           // 選到的情緒關鍵字
+  moodCustom: '',     // 自己補的形容詞
+  bpm: 90,
+  reference: '',      // 參考曲目
+  layers: { rhythm: '', bass: '', harmony: '', melody: '', deco: '' },
+};
 
 // 科目與章節資料
 const SUBJECTS = [
@@ -620,6 +648,8 @@ export default function App() {
     custom: { song: '', hook: '', category: '' },
   });
 
+  const [arrPlan, setArrPlan] = useState(DEFAULT_ARR_PLAN);
+
   const [subjectLyrics, setSubjectLyrics] = useState({
     drawnSubject: null,    // 抽中的科目
     customChapter: '',     // 學生自己輸入的章節
@@ -784,6 +814,24 @@ export default function App() {
             setMelody(data.melody);
           }
           if (data.completed) setCompleted(data.completed);
+          if (data.arrPlan && typeof data.arrPlan === 'object') {
+            const lp = data.arrPlan;
+            setArrPlan({
+              mood: Array.isArray(lp.mood)
+                ? lp.mood.filter((m) => ARR_MOODS.includes(m))
+                : (typeof lp.mood === 'string' && lp.mood ? [lp.mood] : []),
+              moodCustom: typeof lp.moodCustom === 'string' ? lp.moodCustom : (typeof lp.mood === 'string' ? lp.mood : ''),
+              bpm: Number(lp.bpm) > 0 ? Number(lp.bpm) : DEFAULT_ARR_PLAN.bpm,
+              reference: typeof lp.reference === 'string' ? lp.reference : DEFAULT_ARR_PLAN.reference,
+              layers: ARR_LAYERS.reduce(
+                (acc, l) => ({
+                  ...acc,
+                  [l.id]: lp.layers && typeof lp.layers[l.id] === 'string' ? lp.layers[l.id] : '',
+                }),
+                {},
+              ),
+            });
+          }
           if (data.lyricAnalysis) {
             setLyricAnalysis((prev) => ({
               studentInfo: data.lyricAnalysis.studentInfo || prev.studentInfo,
@@ -809,7 +857,7 @@ export default function App() {
     async (patch) => {
       if (!loadedRef.current || !user) return;
       try {
-        const payload = { progression, melody, timeSig, completed, lyricAnalysis, subjectLyrics, ...patch };
+        const payload = { progression, melody, timeSig, completed, lyricAnalysis, subjectLyrics, arrPlan, ...patch };
         await setDoc(doc(db, 'progress', user.uid), payload, { merge: true });
         setSavedMsg('已儲存');
         setTimeout(() => setSavedMsg(''), 1800);
@@ -818,7 +866,7 @@ export default function App() {
         setTimeout(() => setSavedMsg(''), 2200);
       }
     },
-    [user, progression, melody, timeSig, completed, lyricAnalysis, subjectLyrics]
+    [user, progression, melody, timeSig, completed, lyricAnalysis, subjectLyrics, arrPlan]
   );
 
   async function ensureAudio() {
@@ -1325,6 +1373,19 @@ export default function App() {
           />
         )}
 
+        {page === 'arr' && (
+          <ArrangementPage
+            plan={arrPlan}
+            setPlan={setArrPlan}
+            done={completed.arr}
+            toggleDone={() => toggleComplete('arr')}
+            onSave={() => persist({})}
+            savedMsg={savedMsg}
+            progression={progression}
+            timeSig={timeSig}
+          />
+        )}
+
         {page === 'melody' && (
           <MelodyPage
             progression={progression}
@@ -1369,6 +1430,7 @@ function OverviewPage({ completed, go }) {
     { id: 'lyric-analysis', title: '歌詞記憶分析', desc: '聽幾首洗腦金曲的副歌片段，感受什麼樣的歌詞和節奏最容易被記住。', icon: Headphones },
     { id: 'lyrics', title: '歌詞創作', desc: '從主題發想到押韻技巧，練習把想法變成能唱的句子。', icon: PenLine },
     { id: 'chords', title: '和弦進行', desc: '用互動和弦工具聽懂每個級數的情緒，動手排出自己的和弦進行。', icon: Guitar },
+    { id: 'arr', title: '配器規劃', desc: '先用形容詞定義整首歌的氛圍，再把編曲拆成五個角色，規劃每個角色要放什麼聲音。', icon: Layers },
     { id: 'melody', title: '旋律寫作', desc: '在鋼琴捲軸上為你的和弦進行畫出第一條旋律線。', icon: Waves },
   ];
   return (
@@ -2812,7 +2874,239 @@ function ChordsPage({
 }
 
 /* ---------------------------------------------------------------- */
-/* 章節五：旋律寫作                                                     */
+/* 章節五：配器規劃（先定氛圍，再用「五層」概念規劃配器）                  */
+/* ---------------------------------------------------------------- */
+
+function ArrangementPage({ plan, setPlan, done, toggleDone, onSave, savedMsg, progression, timeSig }) {
+  const onSaveRef = useRef(onSave);
+  onSaveRef.current = onSave;
+  const firstRenderRef = useRef(true);
+  // 狀態更新後才存檔；輸入框打字時防抖避免寫入太頻繁
+  useEffect(() => {
+    if (firstRenderRef.current) { firstRenderRef.current = false; return undefined; }
+    const t = setTimeout(() => onSaveRef.current(), 700);
+    return () => clearTimeout(t);
+  }, [plan]);
+
+  const [copied, setCopied] = useState(false);
+
+  const set = (patch) => setPlan((prev) => ({ ...prev, ...patch }));
+  const setLayer = (id, val) => setPlan((prev) => ({ ...prev, layers: { ...prev.layers, [id]: val } }));
+
+  const toggleMood = (m) => {
+    const cur = plan.mood;
+    set({ mood: cur.includes(m) ? cur.filter((x) => x !== m) : [...cur, m] });
+  };
+
+  const allMoods = [...plan.mood, plan.moodCustom.trim()].filter(Boolean);
+  const filledLayers = ARR_LAYERS.filter((l) => (plan.layers[l.id] || '').trim() !== '');
+  const missingLayers = ARR_LAYERS.filter((l) => !(plan.layers[l.id] || '').trim());
+
+  function buildSummary() {
+    const lines = [
+      `【氛圍】${allMoods.join('、') || '（未填）'}`,
+      `【速度】${plan.bpm} BPM`,
+      `【參考曲目】${plan.reference.trim() || '（未填）'}`,
+      '',
+      '【五層配器】',
+      ...ARR_LAYERS.map((l) => `${l.label}：${(plan.layers[l.id] || '').trim() || '（未填）'}`),
+    ];
+    return lines.join('\n');
+  }
+
+  function copySummary() {
+    const text = buildSummary();
+    const finish = () => { setCopied(true); setTimeout(() => setCopied(false), 1800); };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(finish).catch(finish);
+    } else {
+      finish();
+    }
+  }
+
+  const chordText = (progression || []).map((d) => chordSymbol(d)).join(' – ');
+
+  return (
+    <div>
+      <div className="flex items-center justify-between gap-4 mb-1">
+        <SectionHeading eyebrowNum="05" title="配器規劃" />
+        <button onClick={toggleDone} className="shrink-0 text-xs border border-[#333B52] rounded-full px-3 py-1.5 flex items-center gap-1 text-[#A9AFC3] hover:text-[#F2EFE9] mt-1">
+          <Check size={13} className={done ? 'text-[#8FBF9F]' : ''} /> {done ? '已完成' : '標記完成'}
+        </button>
+      </div>
+      <p className="text-[#A9AFC3] max-w-[62ch] leading-relaxed -mt-4 mb-8">
+        前面兩頁做完，你已經有和弦和旋律。這一步是<strong className="text-[#F2EFE9] font-normal">「先決定氛圍，再找聲音」</strong>——<br />
+        先用幾個形容詞定義整首歌的感覺，再去 GarageBand 找 loop。這樣你找聲音時有判斷標準，
+        而不是「這個好聽就放」。<br />
+        然後把編曲拆成五個角色，每個角色負責一件事。<strong className="text-[#F2EFE9] font-normal">「豐富」不等於很多軌</strong>，而是每一層各司其職。
+      </p>
+
+      {/* 第一步：氛圍卡 */}
+      <Panel className="mb-6">
+        <div className="flex items-baseline justify-between mb-1">
+          <p className="font-serif text-lg">第一步：氛圍卡</p>
+          <span className="text-xs text-[#6B7285]">先定感覺，再找聲音</span>
+        </div>
+        <p className="text-sm text-[#A9AFC3] mb-4">選幾個形容詞，描述這首歌給人的感覺（可複選，也可以自己補一個詞）。</p>
+
+        <div className="flex flex-wrap gap-2 mb-3">
+          {ARR_MOODS.map((m) => {
+            const on = plan.mood.includes(m);
+            return (
+              <button
+                key={m}
+                onClick={() => toggleMood(m)}
+                className={`px-3.5 py-1.5 rounded-full text-sm border transition-colors ${
+                  on
+                    ? 'bg-[#E8A33D] text-[#1B1F2A] border-[#E8A33D]'
+                    : 'border-[#333B52] text-[#A9AFC3] hover:text-[#F2EFE9] hover:border-[#6B7285]'
+                }`}
+              >
+                {m}
+              </button>
+            );
+          })}
+        </div>
+
+        <input
+          type="text"
+          value={plan.moodCustom}
+          onChange={(e) => set({ moodCustom: e.target.value })}
+          placeholder="自己補一個詞，例如：雨天感、老派浪漫"
+          className="w-full bg-[#1F2430] border border-[#333B52] rounded-md px-3 py-2 text-sm text-[#F2EFE9] placeholder:text-[#6B7285] focus:border-[#E8A33D] outline-none mb-5"
+        />
+
+        <div className="grid md:grid-cols-2 gap-5">
+          <div>
+            <p className="text-sm text-[#A9AFC3] mb-2">速度（BPM）</p>
+            <div className="flex items-center gap-4">
+              <input
+                type="range" min="60" max="180" value={plan.bpm}
+                onChange={(e) => set({ bpm: Number(e.target.value) })}
+                className="flex-1 accent-[#E8A33D]"
+              />
+              <span className="font-serif text-2xl text-[#F2EFE9] w-20 text-right">{plan.bpm}<span className="text-xs text-[#A9AFC3] ml-1">BPM</span></span>
+            </div>
+            <p className="text-xs text-[#6B7285] mt-1.5">抒情 70–90、輕快 100–120、搖滾 120–140、電子 120–130。</p>
+          </div>
+          <div>
+            <p className="text-sm text-[#A9AFC3] mb-2">參考曲目</p>
+            <input
+              type="text"
+              value={plan.reference}
+              onChange={(e) => set({ reference: e.target.value })}
+              placeholder="找一首氛圍最像的歌，寫歌名＋歌手"
+              className="w-full bg-[#1F2430] border border-[#333B52] rounded-md px-3 py-2 text-sm text-[#F2EFE9] placeholder:text-[#6B7285] focus:border-[#E8A33D] outline-none"
+            />
+            <p className="text-xs text-[#6B7285] mt-1.5">之後在 GB 找 loop 卡住時，回頭聽這首歌。</p>
+          </div>
+        </div>
+      </Panel>
+
+      {/* 第二步：五層配器 */}
+      <Panel className="mb-6">
+        <div className="flex items-baseline justify-between mb-1">
+          <p className="font-serif text-lg">第二步：五個角色，各司其職</p>
+          <span className="text-xs text-[#6B7285]">已填 {filledLayers.length} / {ARR_LAYERS.length} 層</span>
+        </div>
+        <p className="text-sm text-[#A9AFC3] mb-5">
+          每一層都寫下你要放什麼聲音。前四層是骨架，通常一首歌不能少；裝飾層只在段落轉換時出現，主歌留白、副歌才加。
+        </p>
+
+        {chordText && (
+          <div className="border border-[#333B52] rounded-md px-4 py-3 mb-5 bg-[#1F2430]">
+            <span className="text-xs text-[#6B7285]">你的和弦進行（{timeSig}）：</span>
+            <span className="text-sm text-[#E8A33D] ml-2">{chordText}</span>
+            <span className="text-xs text-[#6B7285] ml-2">— 和聲層就要鋪這串</span>
+          </div>
+        )}
+
+        <div className="space-y-4">
+          {ARR_LAYERS.map((l, i) => {
+            const val = (plan.layers[l.id] || '').trim();
+            return (
+              <div key={l.id} className="border border-[#333B52] rounded-md p-4">
+                <div className="flex items-baseline justify-between gap-3 mb-1.5">
+                  <p className="font-serif text-base">
+                    <span className="text-[#E8A33D] text-xs font-sans mr-2">{i + 1}</span>
+                    {l.label}
+                  </p>
+                  <span className="text-xs text-[#6B7285] shrink-0">例如：{l.examples}</span>
+                </div>
+                <p className="text-xs text-[#A9AFC3] mb-2.5 leading-relaxed">{l.desc}</p>
+                <input
+                  type="text"
+                  value={plan.layers[l.id] || ''}
+                  onChange={(e) => setLayer(l.id, e.target.value)}
+                  placeholder={`我要用的${l.label.replace('層', '')}聲音是…`}
+                  className="w-full bg-[#1F2430] border border-[#333B52] rounded-md px-3 py-2 text-sm text-[#F2EFE9] placeholder:text-[#6B7285] focus:border-[#E8A33D] outline-none"
+                />
+              </div>
+            );
+          })}
+        </div>
+
+        {missingLayers.length > 0 && (
+          <p className="text-xs text-[#E8A33D] mt-4">
+            還差 {missingLayers.map((l) => l.label).join('、')}。如果真的用不到，寫「不用」也是一種決定——但要說得出理由。
+          </p>
+        )}
+      </Panel>
+
+      {/* 總結卡 */}
+      <Panel>
+        <div className="flex items-baseline justify-between mb-3">
+          <p className="font-serif text-lg">你的配器計畫</p>
+          <button
+            onClick={copySummary}
+            className="text-xs border border-[#333B52] rounded-full px-3 py-1.5 flex items-center gap-1 text-[#A9AFC3] hover:text-[#F2EFE9]"
+          >
+            <Copy size={12} /> {copied ? '已複製' : '複製計畫'}
+          </button>
+        </div>
+
+        <div className="border border-[#333B52] rounded-md p-4 bg-[#1F2430] text-sm leading-relaxed space-y-1.5">
+          <p>
+            <span className="text-[#6B7285]">氛圍：</span>
+            <span className={allMoods.length ? 'text-[#F2EFE9]' : 'text-[#6B7285]'}>
+              {allMoods.join('、') || '（還沒選）'}
+            </span>
+          </p>
+          <p>
+            <span className="text-[#6B7285]">速度：</span>
+            <span className="text-[#F2EFE9]">{plan.bpm} BPM</span>
+          </p>
+          <p>
+            <span className="text-[#6B7285]">參考曲目：</span>
+            <span className={plan.reference.trim() ? 'text-[#F2EFE9]' : 'text-[#6B7285]'}>
+              {plan.reference.trim() || '（還沒填）'}
+            </span>
+          </p>
+          <div className="pt-2 space-y-1.5">
+            {ARR_LAYERS.map((l) => {
+              const v = (plan.layers[l.id] || '').trim();
+              return (
+                <p key={l.id}>
+                  <span className="text-[#6B7285] inline-block w-[4.5rem]">{l.label}</span>
+                  <span className={v ? 'text-[#F2EFE9]' : 'text-[#6B7285]'}>{v || '（還沒填）'}</span>
+                </p>
+              );
+            })}
+          </div>
+        </div>
+
+        <p className="text-xs text-[#A9AFC3] mt-4 leading-relaxed">
+          接下來到 GarageBand：開新專案、把速度設成 {plan.bpm} BPM，照著這張表一層一層把 loop 拖進去。
+          先開節奏層對齊，再補和聲與低音，旋律最後疊。做完回來這裡點「標記完成」。
+        </p>
+        {savedMsg && <p className="text-xs text-[#8FBF9F] mt-2">{savedMsg}</p>}
+      </Panel>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------- */
+/* 章節六：旋律寫作                                                     */
 /* ---------------------------------------------------------------- */
 
 function MelodyPage({
@@ -2824,7 +3118,7 @@ function MelodyPage({
   return (
     <div>
       <div className="flex items-center justify-between gap-4 mb-1">
-        <SectionHeading eyebrowNum="05" title="旋律寫作" />
+        <SectionHeading eyebrowNum="06" title="旋律寫作" />
         <button onClick={toggleDone} className="shrink-0 text-xs border border-[#333B52] rounded-full px-3 py-1.5 flex items-center gap-1 text-[#A9AFC3] hover:text-[#F2EFE9] mt-1">
           <Check size={13} className={done ? 'text-[#8FBF9F]' : ''} /> {done ? '已完成' : '標記完成'}
         </button>
@@ -3018,7 +3312,9 @@ function TeacherDashboard() {
       '自選歌曲', '自選歌曲-洗腦邏輯', '自選歌曲-歸類',
       '主題歌詞-組別', '主題歌詞-科目', '主題歌詞-章節', '主題歌詞-歌名', '主題歌詞-主歌', '主題歌詞-副歌',
       '和弦進行',
-      '架構分析完成', '歌詞分析完成', '歌詞創作完成', '和弦完成', '旋律完成'
+      '氛圍關鍵字', '氛圍自訂詞', '速度(BPM)', '參考曲目',
+      '節奏層', '低音層', '和聲層', '旋律層', '裝飾層',
+      '架構分析完成', '歌詞分析完成', '歌詞創作完成', '和弦完成', '配器完成', '旋律完成'
     ];
 
     // 準備資料列
@@ -3028,6 +3324,11 @@ function TeacherDashboard() {
       const custom = s.lyricAnalysis?.custom || {};
       const subj = s.subjectLyrics || {};
       const progression = (s.progression || []).map((d) => chordSymbol(d)).join(' → ');
+      const ap = s.arrPlan || {};
+      const apMood = Array.isArray(ap.mood)
+        ? ap.mood.join(' + ')
+        : (typeof ap.mood === 'string' ? ap.mood : '');
+      const apLayer = (id) => (ap.layers && typeof ap.layers[id] === 'string' ? ap.layers[id] : '');
 
       return [
         info.className || '',
@@ -3052,10 +3353,20 @@ function TeacherDashboard() {
         subj.verse || '',
         subj.chorus || '',
         progression,
+        apMood,
+        ap.moodCustom || '',
+        ap.bpm != null ? ap.bpm : '',
+        ap.reference || '',
+        apLayer('rhythm'),
+        apLayer('bass'),
+        apLayer('harmony'),
+        apLayer('melody'),
+        apLayer('deco'),
         s.completed?.structure ? '✓' : '',
         s.completed?.['lyric-analysis'] ? '✓' : '',
         s.completed?.lyrics ? '✓' : '',
         s.completed?.chords ? '✓' : '',
+        s.completed?.arr ? '✓' : '',
         s.completed?.melody ? '✓' : '',
       ];
     });
