@@ -367,12 +367,6 @@ const CHAPTERS = [
 /* 配器規劃：先定氛圍，再用「五層」概念規劃配器                          */
 /* ---------------------------------------------------------------- */
 
-// 氛圍形容詞（學生點選或自己補一個詞）
-const ARR_MOODS = [
-  '溫暖', '孤單', '緊張', '慵懶', '明亮', '憂傷',
-  '熱血', '夢幻', '神祕', '俏皮', '懷舊', '遼闊',
-];
-
 // 五個角色：每個角色至少要有一個聲音
 const ARR_LAYERS = [
   { id: 'rhythm', label: '節奏層', examples: '鼓、打擊樂', desc: '定整首歌的速度與律動，其他層都跟著它走。' },
@@ -383,8 +377,7 @@ const ARR_LAYERS = [
 ];
 
 const DEFAULT_ARR_PLAN = {
-  mood: [],           // 選到的情緒關鍵字
-  moodCustom: '',     // 自己補的形容詞
+  mood: '',           // 形容詞（自由填寫）
   bpm: 90,
   reference: '',      // 參考曲目
   layers: { rhythm: '', bass: '', harmony: '', melody: '', deco: '' },
@@ -816,11 +809,13 @@ export default function App() {
           if (data.completed) setCompleted(data.completed);
           if (data.arrPlan && typeof data.arrPlan === 'object') {
             const lp = data.arrPlan;
+            // 舊資料的 mood 是陣列＋moodCustom，合併成一個文字欄位
+            const legacyWords = [lp.moodCustom, ...(Array.isArray(lp.mood) ? lp.mood : [])]
+              .filter((w) => typeof w === 'string' && w.trim() !== '');
             setArrPlan({
-              mood: Array.isArray(lp.mood)
-                ? lp.mood.filter((m) => ARR_MOODS.includes(m))
-                : (typeof lp.mood === 'string' && lp.mood ? [lp.mood] : []),
-              moodCustom: typeof lp.moodCustom === 'string' ? lp.moodCustom : (typeof lp.mood === 'string' ? lp.mood : ''),
+              mood: typeof lp.mood === 'string'
+                ? lp.mood
+                : (legacyWords.length ? legacyWords.join('、') : ''),
               bpm: Number(lp.bpm) > 0 ? Number(lp.bpm) : DEFAULT_ARR_PLAN.bpm,
               reference: typeof lp.reference === 'string' ? lp.reference : DEFAULT_ARR_PLAN.reference,
               layers: ARR_LAYERS.reduce(
@@ -2893,18 +2888,13 @@ function ArrangementPage({ plan, setPlan, done, toggleDone, onSave, savedMsg, pr
   const set = (patch) => setPlan((prev) => ({ ...prev, ...patch }));
   const setLayer = (id, val) => setPlan((prev) => ({ ...prev, layers: { ...prev.layers, [id]: val } }));
 
-  const toggleMood = (m) => {
-    const cur = plan.mood;
-    set({ mood: cur.includes(m) ? cur.filter((x) => x !== m) : [...cur, m] });
-  };
-
-  const allMoods = [...plan.mood, plan.moodCustom.trim()].filter(Boolean);
+  const moodText = (plan.mood || '').trim();
   const filledLayers = ARR_LAYERS.filter((l) => (plan.layers[l.id] || '').trim() !== '');
   const missingLayers = ARR_LAYERS.filter((l) => !(plan.layers[l.id] || '').trim());
 
   function buildSummary() {
     const lines = [
-      `【氛圍】${allMoods.join('、') || '（未填）'}`,
+      `【氛圍】${moodText || '（未填）'}`,
       `【速度】${plan.bpm} BPM`,
       `【參考曲目】${plan.reference.trim() || '（未填）'}`,
       '',
@@ -2947,33 +2937,13 @@ function ArrangementPage({ plan, setPlan, done, toggleDone, onSave, savedMsg, pr
           <p className="font-serif text-lg">第一步：氛圍卡</p>
           <span className="text-xs text-[#6B7285]">先定感覺，再找聲音</span>
         </div>
-        <p className="text-sm text-[#A9AFC3] mb-4">選幾個形容詞，描述這首歌給人的感覺（可複選，也可以自己補一個詞）。</p>
-
-        <div className="flex flex-wrap gap-2 mb-3">
-          {ARR_MOODS.map((m) => {
-            const on = plan.mood.includes(m);
-            return (
-              <button
-                key={m}
-                onClick={() => toggleMood(m)}
-                className={`px-3.5 py-1.5 rounded-full text-sm border transition-colors ${
-                  on
-                    ? 'bg-[#E8A33D] text-[#1B1F2A] border-[#E8A33D]'
-                    : 'border-[#333B52] text-[#A9AFC3] hover:text-[#F2EFE9] hover:border-[#6B7285]'
-                }`}
-              >
-                {m}
-              </button>
-            );
-          })}
-        </div>
+        <p className="text-sm text-[#A9AFC3] mb-4">用幾個形容詞，描述這首歌給人的感覺。</p>
 
         <input
           type="text"
-          value={plan.moodCustom}
-          onChange={(e) => set({ moodCustom: e.target.value })}
-          placeholder="自己補一個詞，例如：雨天感、老派浪漫"
-          className="w-full bg-[#1F2430] border border-[#333B52] rounded-md px-3 py-2 text-sm text-[#F2EFE9] placeholder:text-[#6B7285] focus:border-[#E8A33D] outline-none mb-5"
+          value={plan.mood}
+          onChange={(e) => set({ mood: e.target.value })}
+          className="w-full bg-[#1F2430] border border-[#333B52] rounded-md px-3 py-2 text-sm text-[#F2EFE9] focus:border-[#E8A33D] outline-none mb-5"
         />
 
         <div className="grid md:grid-cols-2 gap-5">
@@ -3068,8 +3038,8 @@ function ArrangementPage({ plan, setPlan, done, toggleDone, onSave, savedMsg, pr
         <div className="border border-[#333B52] rounded-md p-4 bg-[#1F2430] text-sm leading-relaxed space-y-1.5">
           <p>
             <span className="text-[#6B7285]">氛圍：</span>
-            <span className={allMoods.length ? 'text-[#F2EFE9]' : 'text-[#6B7285]'}>
-              {allMoods.join('、') || '（還沒選）'}
+            <span className={moodText ? 'text-[#F2EFE9]' : 'text-[#6B7285]'}>
+              {moodText || '（還沒填）'}
             </span>
           </p>
           <p>
@@ -3312,7 +3282,7 @@ function TeacherDashboard() {
       '自選歌曲', '自選歌曲-洗腦邏輯', '自選歌曲-歸類',
       '主題歌詞-組別', '主題歌詞-科目', '主題歌詞-章節', '主題歌詞-歌名', '主題歌詞-主歌', '主題歌詞-副歌',
       '和弦進行',
-      '氛圍關鍵字', '氛圍自訂詞', '速度(BPM)', '參考曲目',
+      '氛圍形容詞', '速度(BPM)', '參考曲目',
       '節奏層', '低音層', '和聲層', '旋律層', '裝飾層',
       '架構分析完成', '歌詞分析完成', '歌詞創作完成', '和弦完成', '配器完成', '旋律完成'
     ];
@@ -3325,9 +3295,9 @@ function TeacherDashboard() {
       const subj = s.subjectLyrics || {};
       const progression = (s.progression || []).map((d) => chordSymbol(d)).join(' → ');
       const ap = s.arrPlan || {};
-      const apMood = Array.isArray(ap.mood)
-        ? ap.mood.join(' + ')
-        : (typeof ap.mood === 'string' ? ap.mood : '');
+      const apMood = typeof ap.mood === 'string'
+        ? ap.mood
+        : (Array.isArray(ap.mood) ? ap.mood.join(' + ') : '');
       const apLayer = (id) => (ap.layers && typeof ap.layers[id] === 'string' ? ap.layers[id] : '');
 
       return [
@@ -3354,7 +3324,6 @@ function TeacherDashboard() {
         subj.chorus || '',
         progression,
         apMood,
-        ap.moodCustom || '',
         ap.bpm != null ? ap.bpm : '',
         ap.reference || '',
         apLayer('rhythm'),
