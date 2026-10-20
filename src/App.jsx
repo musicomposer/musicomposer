@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import * as Tone from 'tone';
-import { Music, ListMusic, PenLine, Guitar, Waves, Play, Pause, SkipBack, Save, Check, X, Download, LogOut, ExternalLink, Headphones, Copy, Undo2, Layers } from 'lucide-react';
+import { Music, ListMusic, PenLine, Guitar, Waves, Play, Pause, SkipBack, Save, Check, X, Download, LogOut, ExternalLink, Headphones, Copy, Undo2, Layers, GraduationCap } from 'lucide-react';
 import { auth, googleProvider, db } from './firebase';
 import { onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth';
 import { doc, getDoc, setDoc, collection, getDocs } from 'firebase/firestore';
@@ -732,6 +732,13 @@ export default function App() {
     return unsub;
   }, []);
 
+  // #teacher 網址或瀏覽器上一頁時，同步教師模式狀態
+  useEffect(() => {
+    const onHash = () => setTeacherMode(window.location.hash === '#teacher');
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+
   // 建立合成器（鋼琴取樣優先，失敗時退回合成音）
   useEffect(() => {
     polyRef.current = new Tone.PolySynth(Tone.Synth, {
@@ -827,11 +834,15 @@ export default function App() {
             });
           }
           if (data.lyricAnalysis) {
+            const savedEntries = Array.isArray(data.lyricAnalysis.entries)
+              ? data.lyricAnalysis.entries
+              : [];
             setLyricAnalysis((prev) => ({
               studentInfo: data.lyricAnalysis.studentInfo || prev.studentInfo,
-              entries: Array.isArray(data.lyricAnalysis.entries) && data.lyricAnalysis.entries.length === prev.entries.length
-                ? data.lyricAnalysis.entries
-                : prev.entries,
+              // 逐格對照：就算歌曲數增減過，也不會整批丟掉已填的答案
+              entries: prev.entries.map((empty, i) =>
+                savedEntries[i] ? { ...empty, ...savedEntries[i] } : empty
+              ),
               custom: data.lyricAnalysis.custom || prev.custom,
             }));
           }
@@ -1246,13 +1257,28 @@ export default function App() {
     });
   }
 
+  // 從側欄左下角快速進入教師 Dashboard
+  function openTeacher() {
+    window.location.hash = 'teacher';
+    setTeacherMode(true);
+  }
+
   if (authLoading) {
     return <div className="min-h-screen w-full bg-[#1B1F2A]" />;
   }
 
   // 教師 Dashboard 模式
   if (teacherMode) {
-    return <TeacherDashboard />;
+    return (
+      <TeacherDashboard
+        onExit={() => {
+          setTeacherMode(false);
+          if (window.location.hash) {
+            history.replaceState(null, '', window.location.pathname + window.location.search);
+          }
+        }}
+      />
+    );
   }
 
   if (!user) {
@@ -1306,11 +1332,20 @@ export default function App() {
             );
           })}
         </div>
-        <div className="hidden md:flex items-center justify-between gap-2 px-4 py-3 border-t border-[#333B52]">
-          <span className="text-xs text-[#A9AFC3] truncate">{user.displayName || user.email}</span>
-          <button onClick={() => signOut(auth)} className="text-[#A9AFC3] hover:text-[#E1685B] shrink-0">
-            <LogOut size={15} />
+        <div className="hidden md:flex flex-col gap-2.5 px-4 py-3 border-t border-[#333B52]">
+          <button
+            onClick={openTeacher}
+            className="inline-flex items-center gap-1.5 text-xs text-[#5B6178] hover:text-[#E8A33D] transition-colors"
+            title="教師 Dashboard"
+          >
+            <GraduationCap size={13} /> 教師檢視
           </button>
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs text-[#A9AFC3] truncate">{user.displayName || user.email}</span>
+            <button onClick={() => signOut(auth)} className="text-[#A9AFC3] hover:text-[#E1685B] shrink-0">
+              <LogOut size={15} />
+            </button>
+          </div>
         </div>
       </nav>
 
@@ -1403,11 +1438,19 @@ export default function App() {
         )}
 
         {/* 手機版登出按鈕 */}
-        <div className="md:hidden mt-10 pt-6 border-t border-[#333B52] flex items-center justify-between">
-          <span className="text-xs text-[#A9AFC3] truncate">{user.displayName || user.email}</span>
-          <button onClick={() => signOut(auth)} className="text-xs text-[#A9AFC3] hover:text-[#E1685B] inline-flex items-center gap-1">
-            <LogOut size={13} /> 登出
+        <div className="md:hidden mt-10 pt-6 border-t border-[#333B52] flex items-center justify-between gap-3">
+          <button
+            onClick={openTeacher}
+            className="inline-flex items-center gap-1.5 text-xs text-[#5B6178] hover:text-[#E8A33D] shrink-0"
+          >
+            <GraduationCap size={13} /> 教師檢視
           </button>
+          <div className="flex items-center gap-3 min-w-0">
+            <span className="text-xs text-[#A9AFC3] truncate">{user.displayName || user.email}</span>
+            <button onClick={() => signOut(auth)} className="text-xs text-[#A9AFC3] hover:text-[#E1685B] inline-flex items-center gap-1 shrink-0">
+              <LogOut size={13} /> 登出
+            </button>
+          </div>
         </div>
       </main>
     </div>
@@ -3223,12 +3266,77 @@ function MelodyPage({
 /* 教師 Dashboard                                                      */
 /* ---------------------------------------------------------------- */
 
-function TeacherDashboard() {
+/* ---------------------------------------------------------------- */
+/* 教師 Dashboard                                                     */
+/* ---------------------------------------------------------------- */
+
+// 分頁：每一章一個分頁，只顯示該章欄位，之後加新章就多一個分頁
+const DASH_TABS = [
+  { id: 'overview', label: '完成度總表' },
+  { id: 'lyric-analysis', label: '歌詞記憶分析' },
+  { id: 'subject', label: '主題歌詞' },
+  { id: 'chords', label: '和弦進行' },
+  { id: 'arr', label: '配器規劃' },
+  { id: 'melody', label: '旋律' },
+];
+
+const DASH_CHAPTERS = [
+  { key: 'structure', label: '架構分析' },
+  { key: 'lyric-analysis', label: '歌詞分析' },
+  { key: 'lyrics', label: '歌詞創作' },
+  { key: 'chords', label: '和弦進行' },
+  { key: 'arr', label: '配器規劃' },
+  { key: 'melody', label: '旋律寫作' },
+];
+
+function DashCard({ idx, s, children }) {
+  const info = s.lyricAnalysis?.studentInfo || {};
+  const doneN = DASH_CHAPTERS.filter((c) => s.completed?.[c.key]).length;
+  const all = doneN === DASH_CHAPTERS.length;
+  return (
+    <div className="border border-[#333B52] rounded-md overflow-hidden">
+      <div className="flex items-center gap-3 px-4 py-2.5 bg-[#232838] flex-wrap">
+        <span className="text-xs text-[#5B6178] w-5">{idx + 1}</span>
+        <span className="text-sm font-medium">{info.name || '未填寫'}</span>
+        <span className="text-xs text-[#A9AFC3]">{info.className || '—'} {info.seatNumber || ''}</span>
+        <span className="text-xs bg-[#333B52] text-[#A9AFC3] px-2 py-0.5 rounded">{info.group || '—'}</span>
+        <span className={`ml-auto text-xs ${all ? 'text-[#8FBF9F]' : 'text-[#A9AFC3]'}`}>完成 {doneN}/{DASH_CHAPTERS.length}</span>
+      </div>
+      <div className="px-4 py-3 space-y-2">{children}</div>
+    </div>
+  );
+}
+
+function DashRow({ label, value }) {
+  const v = typeof value === 'string' ? value.trim() : value;
+  return (
+    <div className="flex gap-3 text-sm leading-relaxed">
+      <span className="text-[#A9AFC3] shrink-0 w-16 md:w-24">{label}</span>
+      <span className="text-[#F2EFE9] flex-1 whitespace-pre-wrap break-words">
+        {v ? v : <span className="text-[#5B6178]">—</span>}
+      </span>
+    </div>
+  );
+}
+
+// 旋律陣列轉成可讀的文字：C4 E4 · G4 ｜ …
+function melodyPreview(s) {
+  const m = Array.isArray(s.melody) ? s.melody : [];
+  if (!m.length || m.every((d) => d == null)) return '';
+  const per = tsDef(s.timeSig || '4/4').num;
+  const tokens = m.map((d) => (d == null ? '·' : midiToNote(extendedDegreeMidi(60, d))));
+  const bars = [];
+  for (let i = 0; i < tokens.length; i += per) bars.push(tokens.slice(i, i + per).join(' '));
+  return bars.join(' ｜ ');
+}
+
+function TeacherDashboard({ onExit }) {
   const [password, setPassword] = useState('');
   const [authenticated, setAuthenticated] = useState(false);
   const [students, setStudents] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [expandedId, setExpandedId] = useState(null);
+  const [tab, setTab] = useState('overview');
+  const [query, setQuery] = useState('');
   const [error, setError] = useState('');
 
   const TEACHER_PASSWORD = 'music2024'; // 可修改為您的密碼
@@ -3270,13 +3378,14 @@ function TeacherDashboard() {
       return;
     }
 
-    // 準備表頭
+    // 準備表頭（歌詞記憶分析的歌曲欄位依清單動態產生）
+    const songHeaders = LYRIC_MEMORY_SONGS.flatMap((song) => [
+      `${song.title} 洗腦邏輯`,
+      `${song.title} 歸類`,
+    ]);
     const headers = [
       '班級', '座號', '姓名', '組別',
-      'Umbrella 洗腦邏輯', 'Umbrella 歸類',
-      'Drama 洗腦邏輯', 'Drama 歸類',
-      'Supernova 洗腦邏輯', 'Supernova 歸類',
-      'Cherish 洗腦邏輯', 'Cherish 歸類',
+      ...songHeaders,
       '自選歌曲', '自選歌曲-洗腦邏輯', '自選歌曲-歸類',
       '主題歌詞-組別', '主題歌詞-科目', '主題歌詞-章節', '主題歌詞-歌名', '主題歌詞-主歌', '主題歌詞-副歌',
       '和弦進行',
@@ -3303,14 +3412,10 @@ function TeacherDashboard() {
         info.seatNumber || '',
         info.name || '',
         info.group || '',
-        entries[0]?.hook || '',
-        entries[0]?.category || '',
-        entries[1]?.hook || '',
-        entries[1]?.category || '',
-        entries[2]?.hook || '',
-        entries[2]?.category || '',
-        entries[3]?.hook || '',
-        entries[3]?.category || '',
+        ...LYRIC_MEMORY_SONGS.flatMap((_, i) => [
+          entries[i]?.hook || '',
+          entries[i]?.category || '',
+        ]),
         custom.song || '',
         custom.hook || '',
         custom.category || '',
@@ -3387,10 +3492,140 @@ function TeacherDashboard() {
     );
   }
 
+  // 依搜尋欄位過濾（班級／座號／姓名／組別）
+  const q = query.trim().toLowerCase();
+  const visible = q
+    ? students.filter((s) => {
+        const i = s.lyricAnalysis?.studentInfo || {};
+        return [i.className, i.seatNumber, i.name, i.group]
+          .filter(Boolean)
+          .some((v) => String(v).toLowerCase().includes(q));
+      })
+    : students;
+
+  // 每個分頁顯示該章的欄位
+  function tabBody(s) {
+    const info = s.lyricAnalysis?.studentInfo || {};
+    const subj = s.subjectLyrics || {};
+    const ap = s.arrPlan || {};
+    const apMood = typeof ap.mood === 'string'
+      ? ap.mood
+      : (Array.isArray(ap.mood) ? ap.mood.join('、') : '');
+    const apLayer = (id) => (ap.layers && typeof ap.layers[id] === 'string' ? ap.layers[id].trim() : '');
+    const melodyText = melodyPreview(s);
+
+    if (tab === 'lyric-analysis') {
+      const entries = s.lyricAnalysis?.entries || [];
+      const custom = s.lyricAnalysis?.custom || {};
+      return (
+        <div className="space-y-2">
+          {LYRIC_MEMORY_SONGS.map((song, i) => {
+            const entry = entries[i];
+            if (!entry?.hook && !entry?.category) return null;
+            return (
+              <div key={i} className="bg-[#1F2430] rounded p-2.5">
+                <p className="text-xs text-[#5B6178] mb-1">{song.title}</p>
+                <DashRow label="洗腦邏輯" value={entry.hook} />
+                <DashRow label="歸類" value={entry.category} />
+              </div>
+            );
+          })}
+          {/* 清單之外多出來的舊資料也顯示，避免漏看 */}
+          {entries.slice(LYRIC_MEMORY_SONGS.length).map((entry, i) =>
+            entry?.hook || entry?.category ? (
+              <div key={`x${i}`} className="bg-[#1F2430] rounded p-2.5">
+                <p className="text-xs text-[#5B6178] mb-1">歌曲 {LYRIC_MEMORY_SONGS.length + i + 1}</p>
+                <DashRow label="洗腦邏輯" value={entry.hook} />
+                <DashRow label="歸類" value={entry.category} />
+              </div>
+            ) : null
+          )}
+          {(custom.song || custom.hook || custom.category) ? (
+            <div className="bg-[#1F2430] rounded p-2.5">
+              <p className="text-xs text-[#5B6178] mb-1">自選歌曲</p>
+              <DashRow label="歌曲" value={custom.song} />
+              <DashRow label="洗腦邏輯" value={custom.hook} />
+              <DashRow label="歸類" value={custom.category} />
+            </div>
+          ) : null}
+        </div>
+      );
+    }
+
+    if (tab === 'subject') {
+      const branches = ['branch1', 'branch2', 'branch3', 'branch4']
+        .map((k) => subj.keywords?.[k])
+        .filter((b) => b && (b.title || (b.words || []).some((w) => w)));
+      return (
+        <div className="space-y-2">
+          <div className="bg-[#1F2430] rounded p-2.5 space-y-1.5">
+            <DashRow label="組別" value={subj.group} />
+            <DashRow label="科目" value={subj.drawnSubject?.name} />
+            <DashRow label="章節" value={subj.customChapter} />
+            <DashRow label="歌名" value={subj.songTitle} />
+          </div>
+          {branches.length > 0 && (
+            <div className="bg-[#1F2430] rounded p-2.5">
+              <p className="text-xs text-[#5B6178] mb-1.5">關鍵字</p>
+              <div className="space-y-1.5">
+                {branches.map((b, i) => (
+                  <DashRow
+                    key={i}
+                    label={b.title || `分支 ${i + 1}`}
+                    value={(b.words || []).filter(Boolean).join('、')}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="bg-[#1F2430] rounded p-2.5">
+            <DashRow label="主歌" value={subj.verse} />
+            <DashRow label="副歌" value={subj.chorus} />
+          </div>
+        </div>
+      );
+    }
+
+    if (tab === 'chords') {
+      return (
+        <div className="bg-[#1F2430] rounded p-2.5 space-y-1.5">
+          <DashRow label="拍號" value={s.timeSig || '4/4'} />
+          <DashRow
+            label="和弦進行"
+            value={(s.progression || []).length ? s.progression.map((d) => chordSymbol(d)).join(' → ') : ''}
+          />
+        </div>
+      );
+    }
+
+    if (tab === 'arr') {
+      return (
+        <div className="bg-[#1F2430] rounded p-2.5 space-y-1.5">
+          <DashRow label="氛圍" value={apMood} />
+          <DashRow label="速度" value={ap.bpm != null ? `${ap.bpm} BPM` : ''} />
+          <DashRow label="參考曲目" value={ap.reference} />
+          {ARR_LAYERS.map((l) => <DashRow key={l.id} label={l.label} value={apLayer(l.id)} />)}
+        </div>
+      );
+    }
+
+    if (tab === 'melody') {
+      return (
+        <div className="bg-[#1F2430] rounded p-2.5 space-y-1.5">
+          <DashRow label="和弦" value={(s.progression || []).map((d) => chordSymbol(d)).join(' → ')} />
+          <DashRow label="旋律" value={melodyText} />
+        </div>
+      );
+    }
+
+    // overview：完成度矩陣在表格裡
+    return null;
+  }
+
   return (
     <div className="min-h-screen bg-[#1B1F2A] text-[#F2EFE9] p-4 md:p-8">
-      <div className="max-w-4xl mx-auto">
-        <div className="flex items-center justify-between mb-6">
+      <div className="max-w-5xl mx-auto">
+        <div className="flex items-center justify-between gap-3 mb-5 flex-wrap">
           <h1 className="font-serif text-2xl">📊 學生回答總覽</h1>
           <div className="flex items-center gap-3">
             <button
@@ -3400,12 +3635,35 @@ function TeacherDashboard() {
               📥 匯出 Excel
             </button>
             <button
+              onClick={onExit}
+              className="text-xs text-[#A9AFC3] hover:text-[#F2EFE9]"
+            >
+              ← 回到課程
+            </button>
+            <button
               onClick={() => setAuthenticated(false)}
               className="text-xs text-[#A9AFC3] hover:text-[#E1685B]"
             >
               登出
             </button>
           </div>
+        </div>
+
+        {/* 分頁 */}
+        <div className="flex gap-1 overflow-x-auto border-b border-[#333B52] mb-5">
+          {DASH_TABS.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              className={`px-3.5 py-2 text-sm whitespace-nowrap border-b-2 -mb-px transition-colors ${
+                tab === t.id
+                  ? 'border-[#E8A33D] text-[#F2EFE9]'
+                  : 'border-transparent text-[#A9AFC3] hover:text-[#F2EFE9]'
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
         </div>
 
         {loading ? (
@@ -3427,87 +3685,77 @@ function TeacherDashboard() {
           </div>
         ) : (
           <>
-            <p className="text-xs text-[#A9AFC3] mb-4">共 {students.length} 位學生</p>
-            <div className="space-y-2">
-              {students.map((s, idx) => {
-                const info = s.lyricAnalysis?.studentInfo || {};
-                const isExpanded = expandedId === s.id;
-                return (
-                  <Panel key={s.id} className="!p-0 overflow-hidden">
-                    <button
-                      onClick={() => setExpandedId(isExpanded ? null : s.id)}
-                      className="w-full flex items-center gap-4 px-4 py-3 text-left hover:bg-[#2A3040] transition-colors"
-                    >
-                      <span className="text-xs text-[#5B6178] w-6">{idx + 1}</span>
-                      <span className="text-sm font-medium w-24">{info.className || '—'}</span>
-                      <span className="text-sm text-[#A9AFC3] w-12">{info.seatNumber || '—'}</span>
-                      <span className="text-sm flex-1">{info.name || '未填寫'}</span>
-                      <span className="text-xs bg-[#333B52] text-[#A9AFC3] px-2 py-0.5 rounded">{info.group || '—'}</span>
-                      <span className="text-xs text-[#5B6178]">{isExpanded ? '▲' : '▼'}</span>
-                    </button>
-
-                    {isExpanded && (
-                      <div className="border-t border-[#333B52] px-4 py-4 space-y-4">
-                        {/* 完成狀態 */}
-                        <div>
-                          <p className="text-xs text-[#E8A33D] mb-2">完成狀態</p>
-                          <div className="flex flex-wrap gap-2">
-                            {['structure', 'lyric-analysis', 'lyrics', 'chords', 'melody'].map((key) => (
-                              <span
-                                key={key}
-                                className={`text-xs px-2 py-1 rounded ${
-                                  s.completed?.[key]
-                                    ? 'bg-[#8FBF9F]/20 text-[#8FBF9F]'
-                                    : 'bg-[#333B52] text-[#5B6178]'
-                                }`}
-                              >
-                                {s.completed?.[key] ? '✓' : '○'} {key}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-
-                        {/* 歌詞記憶分析 */}
-                        {s.lyricAnalysis?.entries && (
-                          <div>
-                            <p className="text-xs text-[#E8A33D] mb-2">歌詞記憶分析</p>
-                            <div className="space-y-2">
-                              {s.lyricAnalysis.entries.map((entry, i) => (
-                                entry?.hook || entry?.category ? (
-                                  <div key={i} className="bg-[#1F2430] rounded p-2">
-                                    <p className="text-xs text-[#5B6178] mb-1">歌曲 {i + 1}</p>
-                                    <p className="text-sm"><span className="text-[#A9AFC3]">洗腦邏輯：</span>{entry.hook || '—'}</p>
-                                    <p className="text-sm"><span className="text-[#A9AFC3]">歸類：</span>{entry.category || '—'}</p>
-                                  </div>
-                                ) : null
-                              ))}
-                              {s.lyricAnalysis.custom?.song && (
-                                <div className="bg-[#1F2430] rounded p-2">
-                                  <p className="text-xs text-[#5B6178] mb-1">自選歌曲</p>
-                                  <p className="text-sm"><span className="text-[#A9AFC3]">歌曲：</span>{s.lyricAnalysis.custom.song}</p>
-                                  <p className="text-sm"><span className="text-[#A9AFC3]">洗腦邏輯：</span>{s.lyricAnalysis.custom.hook || '—'}</p>
-                                  <p className="text-sm"><span className="text-[#A9AFC3]">歸類：</span>{s.lyricAnalysis.custom.category || '—'}</p>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        )}
-
-                        {/* 和弦進行 */}
-                        {s.progression?.length > 0 && (
-                          <div>
-                            <p className="text-xs text-[#E8A33D] mb-2">和弦進行</p>
-                            <p className="text-sm">
-                              {s.progression.map((d) => chordSymbol(d)).join(' → ')}
-                            </p>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </Panel>
-                );
-              })}
+            <div className="flex items-center gap-3 mb-4 flex-wrap">
+              <input
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="搜尋班級／座號／姓名／組別"
+                className="w-64 bg-[#1F2430] border border-[#333B52] rounded-md px-3 py-2 text-sm text-[#F2EFE9] placeholder:text-[#5B6178] focus:border-[#E8A33D] outline-none"
+              />
+              <p className="text-xs text-[#A9AFC3]">
+                共 {visible.length} 位學生{q && `（全班 ${students.length} 位）`}
+              </p>
             </div>
+
+            {tab === 'overview' ? (
+              <div className="border border-[#333B52] rounded-md overflow-x-auto">
+                <table className="w-full text-sm min-w-[780px]">
+                  <thead>
+                    <tr className="bg-[#232838] text-xs text-[#A9AFC3]">
+                      <th className="px-3 py-2.5 text-left font-normal whitespace-nowrap">#</th>
+                      <th className="px-3 py-2.5 text-left font-normal whitespace-nowrap">班級</th>
+                      <th className="px-2 py-2.5 text-left font-normal whitespace-nowrap">座號</th>
+                      <th className="px-3 py-2.5 text-left font-normal whitespace-nowrap">姓名</th>
+                      <th className="px-3 py-2.5 text-left font-normal whitespace-nowrap">組別</th>
+                      {DASH_CHAPTERS.map((c) => (
+                        <th key={c.key} className="px-2 py-2.5 text-center font-normal whitespace-nowrap">{c.label}</th>
+                      ))}
+                      <th className="px-3 py-2.5 text-center font-normal whitespace-nowrap">完成</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visible.map((s, idx) => {
+                      const info = s.lyricAnalysis?.studentInfo || {};
+                      const n = DASH_CHAPTERS.filter((c) => s.completed?.[c.key]).length;
+                      const all = n === DASH_CHAPTERS.length;
+                      return (
+                        <tr key={s.id} className="border-t border-[#333B52] hover:bg-[#232838]">
+                          <td className="px-3 py-2 text-xs text-[#5B6178]">{idx + 1}</td>
+                          <td className="px-3 py-2 whitespace-nowrap">{info.className || '—'}</td>
+                          <td className="px-2 py-2 text-[#A9AFC3] whitespace-nowrap">{info.seatNumber || '—'}</td>
+                          <td className="px-3 py-2 whitespace-nowrap">{info.name || '未填寫'}</td>
+                          <td className="px-3 py-2 text-[#A9AFC3] whitespace-nowrap">{info.group || '—'}</td>
+                          {DASH_CHAPTERS.map((c) => (
+                            <td key={c.key} className="px-2 py-2 text-center">
+                              <span className={s.completed?.[c.key] ? 'text-[#8FBF9F]' : 'text-[#5B6178]'}>
+                                {s.completed?.[c.key] ? '✓' : '○'}
+                              </span>
+                            </td>
+                          ))}
+                          <td className="px-3 py-2 text-center">
+                            <span className={`text-xs ${all ? 'text-[#8FBF9F]' : 'text-[#E8A33D]'}`}>
+                              {n}/{DASH_CHAPTERS.length}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {visible.map((s, idx) => (
+                  <DashCard key={s.id} idx={idx} s={s}>
+                    {tabBody(s)}
+                  </DashCard>
+                ))}
+                {visible.length === 0 && (
+                  <p className="text-xs text-[#5B6178] py-4 text-center">找不到符合的學生</p>
+                )}
+              </div>
+            )}
           </>
         )}
       </div>
