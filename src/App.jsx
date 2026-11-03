@@ -235,6 +235,184 @@ function fullChordNotes(rootMidi, progression) {
 }
 
 /* ---------------------------------------------------------------- */
+/* 旋律範例產生器（「範例＋微調」模式）                                 */
+/* ---------------------------------------------------------------- */
+
+const MELODY_MIN_DEG = 0; // 旋律最低音 = C4
+const MELODY_MAX_DEG = 9; // 旋律最高音 = A5
+
+function degToPc(deg) {
+  return ((MAJOR_SCALE_OFFSETS[((deg % 7) + 7) % 7]) % 12 + 12) % 12;
+}
+
+/* 該和弦裡、落在旋律音域內的和弦音（extDeg，由低到高） */
+function chordToneDegs(rootMidi, item) {
+  if (item == null) return [];
+  const def = chordOf(item);
+  const rootPc = def.rootPc != null ? def.rootPc : MAJOR_SCALE_OFFSETS[((def.rootDeg % 7) + 7) % 7];
+  const pcs = def.iv.map((o) => (((rootPc + o) % 12) + 12) % 12);
+  const out = [];
+  for (let d = MELODY_MIN_DEG; d <= MELODY_MAX_DEG; d += 1) {
+    if (pcs.includes(degToPc(d))) out.push(d);
+  }
+  return out;
+}
+
+/* 該和弦的根音（在旋律音域內）：用來讓旋律收在主音上 */
+function rootToneDegs(rootMidi, item) {
+  if (item == null) return [];
+  const def = chordOf(item);
+  const rootPc = (((def.rootPc != null ? def.rootPc : MAJOR_SCALE_OFFSETS[((def.rootDeg % 7) + 7) % 7]) % 12) + 12) % 12;
+  const out = [];
+  for (let d = MELODY_MIN_DEG; d <= MELODY_MAX_DEG; d += 1) {
+    if (degToPc(d) === rootPc) out.push(d);
+  }
+  return out;
+}
+
+/* 離目標最近的音；平手時選離上一個音最近的 */
+function nearestTone(tones, target, prev) {
+  if (!tones.length) return Math.round(target);
+  let best = tones[0];
+  let bestD = Infinity;
+  let bestP = Infinity;
+  tones.forEach((t) => {
+    const d = Math.abs(t - target);
+    const p = prev == null ? 0 : Math.abs(t - prev);
+    if (d < bestD || (d === bestD && p < bestP)) { bestD = d; bestP = p; best = t; }
+  });
+  return best;
+}
+
+/* 某一拍落在哪個和弦上 */
+function chordAtCol(prog, col) {
+  let off = 0;
+  for (let i = 0; i < prog.length; i += 1) {
+    const b = beatsOf(prog[i]);
+    if (col < off + b) return prog[i];
+    off += b;
+  }
+  return prog.length ? prog[prog.length - 1] : null;
+}
+
+/* 節奏模板：回傳要放音的位置 [{ start, len }] */
+function melodySlots(total, beatsPerBar, style) {
+  const slots = [];
+  const perBar = (fn) => { for (let b = 0; b < total; b += beatsPerBar) fn(b); };
+  if (style === 'jump') {
+    // 跳躍：每拍一個音
+    for (let s = 0; s < total; s += 1) slots.push({ start: s, len: 1 });
+  } else {
+    // 平穩／上行：每小節兩個音
+    perBar((b) => {
+      if (beatsPerBar <= 2) {
+        for (let s = 0; s < beatsPerBar && b + s < total; s += 1) slots.push({ start: b + s, len: 1 });
+      } else if (beatsPerBar === 3) {
+        slots.push({ start: b, len: 2 });
+        slots.push({ start: b + 2, len: 1 });
+      } else if (beatsPerBar >= 6) {
+        slots.push({ start: b, len: 3 });
+        slots.push({ start: b + 3, len: 3 });
+      } else {
+        const half = beatsPerBar / 2;
+        slots.push({ start: b, len: half });
+        slots.push({ start: b + half, len: half });
+      }
+    });
+  }
+  return slots.filter((s) => s.start >= 0 && s.start < total);
+}
+
+/* 依目前的和弦生出一條旋律（extDeg 陣列，null = 休止） */
+function generateMelody(rootMidi, prog, beatsPerBar, style, variant = 0) {
+  const total = totalBeats(prog);
+  const mel = Array(Math.max(0, total)).fill(null);
+  if (!prog.length || total === 0) return mel;
+  const slots = melodySlots(total, beatsPerBar, style);
+  if (!slots.length) return mel;
+  const wob = ((variant * 7) % 5) - 2; // -2..2：讓「換一批」有變化
+  let prev = null;
+
+  slots.forEach((slot, i) => {
+    const item = chordAtCol(prog, slot.start);
+    const tones = chordToneDegs(rootMidi, item);
+    if (!tones.length) return;
+    const isLast = i === slots.length - 1;
+    let deg;
+
+    if (isLast) {
+      // 收在這個和弦的主音上
+      const roots = rootToneDegs(rootMidi, item).filter((d) => tones.includes(d));
+      deg = nearestTone(roots.length ? roots : tones, prev == null ? 4 : prev, prev);
+    } else if (style === 'rise') {
+      // 整體由低到高；中間偶爾小回落是自然的起伏
+      const frac = total > 1 ? slot.start / (total - 1) : 0;
+      deg = nearestTone(tones, 1 + frac * 6 + wob, prev);
+    } else if (style === 'jump') {
+      // 前半小節低音、後半小節高音；兩個音控制在一個五度內，跳得起來但不會太誇張
+      const lo = tones[variant % tones.length];
+      const loMidi = extendedDegreeMidi(rootMidi, lo);
+      const up = tones.filter((t) => extendedDegreeMidi(rootMidi, t) > loMidi);
+      const within = up.filter((t) => extendedDegreeMidi(rootMidi, t) - loMidi <= 7);
+      const hi = within.length ? within[within.length - 1] : (up.length ? up[up.length - 1] : lo);
+      const inSecondHalf = (slot.start % beatsPerBar) >= beatsPerBar / 2;
+      deg = inSecondHalf ? hi : lo;
+      if (prev != null && Math.abs(deg - prev) < 2 && tones.length > 2) deg = deg === lo ? hi : lo;
+    } else {
+      // 平穩：黏在中音區（G4 附近）小幅起伏，擺動依「換一批」變化
+      const center = 4;
+      const base = prev == null ? center : center + (prev - center) * 0.4;
+      deg = nearestTone(tones, base + (((variant + i) % 5) - 2) * 0.5, prev);
+    }
+
+    if (style !== 'jump' && !isLast && prev != null && deg === prev && tones.length > 1) {
+      // 同一個音連著兩次就換一個
+      const up = tones.filter((t) => t > prev);
+      if (up.length) deg = nearestTone(up, prev + 1, prev);
+      else {
+        const down = tones.filter((t) => t < prev);
+        if (down.length) deg = down[down.length - 1];
+      }
+    }
+
+    if (deg == null) return;
+    mel[slot.start] = Math.max(MELODY_MIN_DEG, Math.min(MELODY_MAX_DEG, deg));
+    prev = mel[slot.start];
+  });
+
+  return mel;
+}
+
+function sameMelody(a, b) {
+  const x = Array.isArray(a) ? a : [];
+  const y = Array.isArray(b) ? b : [];
+  if (x.length !== y.length) return false;
+  return x.every((v, i) => v === y[i]);
+}
+
+/* 旋律陣列的語意：deg >= 0 開新音、null = 延續上一個音、-1 = 休止。
+   這裡把它切成 { start, len, deg }，播放與 MIDI 匯出共用，音才會延音。 */
+function melodyRuns(mel) {
+  const out = [];
+  const m = Array.isArray(mel) ? mel : [];
+  for (let col = 0; col < m.length; col += 1) {
+    const deg = m[col];
+    if (deg == null || deg < 0) continue;
+    let end = col + 1;
+    while (end < m.length && m[end] == null) end += 1;
+    out.push({ start: col, len: end - col, deg });
+    col = end - 1;
+  }
+  return out;
+}
+
+const MELODY_STYLES = [
+  { id: 'smooth', name: '平穩', desc: '黏在中音區小幅起伏，音高級進，像說話一樣自然。' },
+  { id: 'rise', name: '上行', desc: '從低音一路爬到高音，情緒往上推，適合放在副歌。' },
+  { id: 'jump', name: '跳躍', desc: '每拍一個音，低音高音來回跳，最有活力。' },
+];
+
+/* ---------------------------------------------------------------- */
 /* MIDI 檔案匯出（可匯入 GarageBand for iPad）                          */
 /* ---------------------------------------------------------------- */
 
@@ -293,9 +471,8 @@ function buildMidiFile(rootMidi, progression, melody, timeSig = '4/4', bpm = 100
     chordTick += beats * ticks;
   });
   const melodyNotes = [];
-  melody.forEach((deg, col) => {
-    if (deg == null) return;
-    melodyNotes.push({ start: col * ticks, dur: ticks * 0.9, note: extendedDegreeMidi(rootMidi, deg) });
+  melodyRuns(melody).forEach(({ start, len, deg }) => {
+    melodyNotes.push({ start: start * ticks, dur: Math.max(1, len - 0.05) * ticks, note: extendedDegreeMidi(rootMidi, deg) });
   });
 
   const microsPerBeat = Math.round(60000000 / bpm);
@@ -1189,19 +1366,26 @@ export default function App() {
     }
   }
 
-  function toggleMelodyCell(col, extDeg) {
+  function setMelodyNote(col, deg) {
     recordHistory();
     setMelody((prev) => {
-      const next = [...prev];
-      next[col] = next[col] === extDeg ? null : extDeg;
+      const next = Array.isArray(prev) ? [...prev] : [];
+      while (next.length <= col) next.push(null);
+      next[col] = deg;
       return next;
     });
   }
 
-  function playAll(secKey) {
+  // 套用一整條旋律（挑範例時用）
+  function applyMelody(arr) {
+    recordHistory();
+    setMelody(Array.isArray(arr) ? [...arr] : []);
+  }
+
+  function playAll(secKey, overrideMel) {
     const key = secKey || activeSec;
     const prog = song[key].progression;
-    const mel = song[key].melody || [];
+    const mel = overrideMel || song[key].melody || [];
     if (!prog.length) return;
     if (metronomeOn) stopMetronome(); // 節拍器跟播放共用 Transport
     ensureAudio().then(() => {
@@ -1219,16 +1403,15 @@ export default function App() {
         tr.schedule((time) => playNotes(notes.map(midiToNote), beats * dur * 1.1, time), t);
         chordCol += beats;
       });
-      mel.forEach((deg, col) => {
-        if (deg == null) return;
-        const t = 0.05 + col * dur;
+      melodyRuns(mel).forEach(({ start, len, deg }) => {
+        const t = 0.05 + start * dur;
+        const hold = Math.max(len * dur * 0.92, dur * 0.3);
         tr.schedule((time) => {
           const note = midiToNote(extendedDegreeMidi(rootMidi, deg));
-          if (pianoReadyRef.current && pianoRef.current) pianoRef.current.triggerAttackRelease(note, dur * 1.1, time);
-          else synthRef.current.triggerAttackRelease(note, dur * 0.85, time);
+          if (pianoReadyRef.current && pianoRef.current) pianoRef.current.triggerAttackRelease(note, hold * 1.1, time);
+          else synthRef.current.triggerAttackRelease(note, hold * 0.85, time);
         }, t);
-      });
-      const totalCols = totalBeats(prog);
+      });      const totalCols = totalBeats(prog);
       playbackRef.current = { dur, totalCols };
       setIsPlaying(true);
       setIsPaused(false);
@@ -1547,7 +1730,10 @@ export default function App() {
             progression={progression}
             melody={melody}
             timeSig={timeSig}
-            toggleMelodyCell={toggleMelodyCell}
+            rootMidi={rootMidi}
+            setMelodyNote={setMelodyNote}
+            applyMelody={applyMelody}
+            playPreview={(arr) => playAll(activeSec, arr)}
             playAll={togglePlay}
             restartPlay={restartPlayback}
             isPlaying={isPlaying}
@@ -3318,12 +3504,95 @@ function ArrangementPage({
 /* ---------------------------------------------------------------- */
 
 function MelodyPage({
-  progression, melody, timeSig, toggleMelodyCell, playAll, restartPlay, isPlaying, isPaused, playheadCol,
+  progression, melody, timeSig, rootMidi, setMelodyNote, applyMelody, playPreview,
+  playAll, restartPlay, isPlaying, isPaused, playheadCol,
   goToChords, done, toggleDone, onSave, savedMsg, onExportMidi, onUndo, canUndo,
   song, activeSec, onSwitchSec, playSec,
 }) {
-  const rows = [7, 6, 5, 4, 3, 2, 1, 0]; // extended degrees, high to low
   const beatsPerBar = tsDef(timeSig).num;
+  const total = totalBeats(progression);
+  const [variant, setVariant] = useState(0);
+  const [selected, setSelected] = useState(null); // 目前選中的拍（index）
+
+  // 換段落／換和弦長度時，清掉選取
+  useEffect(() => { setSelected(null); }, [activeSec, total]);
+
+  // 三條候選旋律（每次重算，量很小）
+  const candidates = MELODY_STYLES.map((s) => ({
+    ...s,
+    notes: generateMelody(rootMidi, progression, beatsPerBar, s.id, variant),
+  }));
+  const chosenId = (candidates.find((c) => sameMelody(c.notes, melody)) || {}).id || null;
+  const noteCount = (melody || []).filter((d) => d != null && d >= 0).length;
+
+  // 把進行切成小節，用來標小節編號與和弦
+  const bars = [];
+  let cursor = 0;
+  progression.forEach((item) => {
+    const b = beatsOf(item);
+    if (!bars.length || cursor % beatsPerBar === 0) bars.push({ beats: 0, chords: [] });
+    const bar = bars[bars.length - 1];
+    bar.beats += b;
+    bar.chords.push(chordSymbol(item));
+    cursor += b;
+  });
+  const CHIP = 54; // 一格寬度（含間距）
+
+  // 某一拍真正會響的音名：null 往回找上一個音，遇到休止或開頭就沒有
+  function heldNoteName(col) {
+    for (let i = col; i >= 0; i -= 1) {
+      const d = melody[i];
+      if (d == null) continue;
+      if (d < 0) return null;
+      return midiToNote(extendedDegreeMidi(rootMidi, d));
+    }
+    return null;
+  }
+
+  const selRaw = selected != null ? melody[selected] : undefined;
+  const selIsNote = selRaw != null && selRaw >= 0;
+  const selIsRest = selRaw === -1;
+  const selIsHold = selected != null && selRaw == null;
+  const selDeg = selIsNote ? selRaw : null;
+  const selTones = selected != null ? chordToneDegs(rootMidi, chordAtCol(progression, selected)) : [];
+  const selIsTone = selIsNote && selTones.includes(selDeg);
+  const selLabel = selIsRest ? '休止'
+    : selIsNote ? midiToNote(extendedDegreeMidi(rootMidi, selDeg))
+      : (heldNoteName(selected) || '—');
+
+  function nudge(delta) {
+    if (!selIsNote) return;
+    const next = Math.max(MELODY_MIN_DEG, Math.min(MELODY_MAX_DEG, selDeg + delta));
+    if (next !== selDeg) setMelodyNote(selected, next);
+  }
+  function snapToTone() {
+    if (!selIsNote || !selTones.length) return;
+    const next = nearestTone(selTones, selDeg, selDeg);
+    if (next !== selDeg) setMelodyNote(selected, next);
+  }
+  function putChordTone() {
+    if (selected == null || !selTones.length) return;
+    setMelodyNote(selected, nearestTone(selTones, 4, null));
+  }
+
+  // 點格子：空白格直接放一個和弦音；有音的格子才選取來調
+  function handleChip(col) {
+    const raw = melody[col] ?? null;
+    const isNote = raw != null && raw >= 0;
+    const isRest = raw === -1;
+    const held = !isNote && !isRest ? heldNoteName(col) : null;
+    if (!isNote && (isRest || !held)) {
+      const tones = chordToneDegs(rootMidi, chordAtCol(progression, col));
+      if (tones.length) {
+        setMelodyNote(col, nearestTone(tones, 4, null));
+        setSelected(col);
+        return;
+      }
+    }
+    setSelected(selected === col ? null : col);
+  }
+
+  const toolBtn = 'inline-flex items-center gap-1.5 text-xs border border-[#333B52] rounded-md px-3 py-2 text-[#A9AFC3] hover:text-[#F2EFE9] hover:border-[#E8A33D]';
 
   return (
     <div>
@@ -3334,8 +3603,10 @@ function MelodyPage({
         </button>
       </div>
       <p className="text-[#A9AFC3] max-w-[62ch] leading-relaxed -mt-4 mb-8">
-        在格子上點選音高，畫出你的旋律線。淺色格子是這個和弦裡的「和弦音」，通常唱起來最穩定；
-        用其他音當作經過音，可以讓旋律更有變化。
+        旋律不用從零開始。<strong className="text-[#F2EFE9] font-normal">第一步</strong>先從下面三條範例挑一條試聽，
+        換到你最想唱的那一條；<strong className="text-[#F2EFE9] font-normal">第二步</strong>再把幾個音改成你喜歡的。
+        <br />
+        淺色的音是這個和弦裡的「和弦音」，唱起來最穩定；其他音當作經過音，可以讓旋律更有變化。
       </p>
 
       {/* 主歌／副歌分頁 */}
@@ -3372,74 +3643,181 @@ function MelodyPage({
         </Panel>
       ) : (
         <Panel>
-          <div className="flex text-[11px] text-[#6B7285] mb-1 pl-10">
-            {progression.map((item, i) => {
-              const beatsPerBar = tsDef(timeSig).num;
-              const colStart = columnOffset(progression, i);
-              const isBarStart = colStart % beatsPerBar === 0;
-              const measureNo = Math.floor(colStart / beatsPerBar) + 1;
-              return (
-                <div key={i} style={{ flex: beatsOf(item) }} className="text-center">
-                  {isBarStart ? `第 ${measureNo} 小節` : '〃'}
-                </div>
-              );
-            })}
+          {/* 第一步：挑一條旋律範例 */}
+          <div className="flex items-baseline justify-between gap-3 mb-1">
+            <p className="font-serif text-lg">第一步：挑一條旋律範例</p>
+            <button
+              onClick={() => setVariant((v) => v + 1)}
+              className="text-xs border border-[#333B52] rounded-md px-3 py-1.5 text-[#A9AFC3] hover:text-[#F2EFE9] hover:border-[#E8A33D]"
+            >
+              換一批範例
+            </button>
           </div>
-          <div className="flex text-xs text-[#A9AFC3] mb-2 pl-10">
-            {progression.map((item, i) => {
-              const beatsPerBar = tsDef(timeSig).num;
-              const colStart = columnOffset(progression, i);
-              const isBarStart = colStart % beatsPerBar === 0;
+          <p className="text-sm text-[#A9AFC3] mb-4">
+            三條都是照你目前的和弦生出來的。先按「試聽」，覺得對了再按「用這條」。
+          </p>
+          <div className="grid md:grid-cols-3 gap-3 mb-9">
+            {candidates.map((c) => {
+              const active = chosenId === c.id;
+              const preview = c.notes
+                .map((d) => (d == null ? '·' : midiToNote(extendedDegreeMidi(rootMidi, d))))
+                .slice(0, 8)
+                .join(' ');
               return (
                 <div
-                  key={i}
-                  style={{ flex: beatsOf(item) }}
-                  className={`text-center ${isBarStart && i > 0 ? 'border-l border-[#4A5169]' : ''}`}
+                  key={c.id}
+                  className={`border rounded-md p-4 flex flex-col ${active ? 'border-[#E8A33D] bg-[#E8A33D]/[0.06]' : 'border-[#333B52]'}`}
                 >
-                  {chordSymbol(item)}
+                  <div className="flex items-center justify-between mb-1.5">
+                    <p className="text-sm text-[#F2EFE9]">{c.name}</p>
+                    {active && <span className="text-[11px] text-[#E8A33D]">使用中</span>}
+                  </div>
+                  <p className="text-xs text-[#A9AFC3] leading-relaxed mb-3">{c.desc}</p>
+                  <p className="text-[11px] text-[#6B7285] font-mono mb-4 truncate">{preview} …</p>
+                  <div className="flex gap-2 mt-auto">
+                    <button
+                      onClick={() => playPreview(c.notes)}
+                      className="flex-1 inline-flex items-center justify-center gap-1.5 text-xs border border-[#333B52] rounded-md px-3 py-2 text-[#A9AFC3] hover:text-[#F2EFE9] hover:border-[#E8A33D]"
+                    >
+                      <Play size={13} /> 試聽
+                    </button>
+                    <button
+                      onClick={() => { applyMelody(c.notes); setSelected(null); }}
+                      className={`flex-1 inline-flex items-center justify-center gap-1.5 text-xs rounded-md px-3 py-2 font-medium border ${
+                        active
+                          ? 'bg-[#E8A33D]/20 text-[#E8A33D] border-[#E8A33D]'
+                          : 'bg-[#E8A33D] text-[#1B1F2A] border-[#E8A33D]'
+                      }`}
+                    >
+                      用這條
+                    </button>
+                  </div>
                 </div>
               );
             })}
           </div>
-          <div className="overflow-x-auto">
-            <div style={{ minWidth: totalBeats(progression) * 34 + 40 }}>
-              {rows.map((rowDeg) => (
-                <div key={rowDeg} className="flex items-center">
-                  <div className="w-10 text-[11px] text-[#A9AFC3] shrink-0 text-right pr-2">
-                    {ROMAN[rowDeg % 7] === 'I' && rowDeg === 7 ? 'I·' : ROMAN[rowDeg % 7]}
+
+          {/* 第二步：微調幾個音 */}
+          <div className="flex items-baseline justify-between gap-3 mb-1">
+            <p className="font-serif text-lg">第二步：微調幾個音</p>
+            <span className="text-xs text-[#6B7285]">{noteCount ? `已放 ${noteCount} 個音` : '還沒選旋律'}</span>
+          </div>
+          <p className="text-sm text-[#A9AFC3] mb-2">
+            點空白的格子會直接放一個和弦音；點有音的格子會選取它，再用下面的按鈕調高、調低、靠攏和弦音或改成休止。
+          </p>
+          <p className="text-xs text-[#6B7285] mb-5 flex flex-wrap gap-x-5 gap-y-2">
+            <span className="inline-flex items-center gap-1.5">
+              <span className="px-1.5 py-0.5 rounded border border-[#4A5169] bg-[#2C3346] text-[#F2EFE9] font-mono">C4</span>和弦音
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="px-1.5 py-0.5 rounded border border-[#333B52] bg-[#1F2430] text-[#A9AFC3] font-mono">D4</span>經過音
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="px-1.5 py-0.5 rounded border border-[#232838] bg-[#1B1F2A] text-[#6B7285] font-mono">C4</span>延續上一個音
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="px-1.5 py-0.5 rounded border border-dashed border-[#333B52] text-[#5B6178] font-mono">·</span>休止
+            </span>
+          </p>
+
+          {noteCount === 0 && (
+            <div className="border border-dashed border-[#333B52] rounded-md px-4 py-3 mb-5 text-sm text-[#6B7285]">
+              還沒有旋律。先從上面三條範例挑一條。
+            </div>
+          )}
+
+          <div className="overflow-x-auto pb-1">
+            <div style={{ minWidth: Math.max(total, 1) * CHIP + 8 }}>
+              <div className="flex gap-1 mb-1">
+                {bars.map((bar, i) => (
+                  <div
+                    key={`n${i}`}
+                    style={{ width: bar.beats * CHIP + (bar.beats - 1) * 4 }}
+                    className="text-[11px] text-[#6B7285] text-center shrink-0"
+                  >
+                    第 {i + 1} 小節
                   </div>
-                  {progression.map((item, chordIdx) => {
-                    const def = chordOf(item);
-                    const rootPc = def.rootPc != null ? def.rootPc : MAJOR_SCALE_OFFSETS[((def.rootDeg % 7) + 7) % 7];
-                    const chordPcs = def.iv.map((o) => (rootPc + o) % 12);
-                    const rowPc = MAJOR_SCALE_OFFSETS[((rowDeg % 7) + 7) % 7];
-                    const isChordTone = chordPcs.includes(rowPc);
-                    const beats = beatsOf(item);
-                    const colStart = columnOffset(progression, chordIdx);
-                    const beatsPerBar = tsDef(timeSig).num;
-                    return Array.from({ length: beats }).map((_, s) => {
-                      const col = colStart + s;
-                      const active = melody[col] === rowDeg;
-                      const isPlayhead = playheadCol === col;
-                      const isBarLine = col > 0 && col % beatsPerBar === 0; // 小節線
-                      return (
-                        <button
-                          key={col}
-                          onClick={() => toggleMelodyCell(col, rowDeg)}
-                          style={{ flex: 1 }}
-                          className={`h-8 border border-[#1B1F2A] transition-colors ${
-                            active ? 'bg-[#E1685B]' : isChordTone ? 'bg-[#2C3346]' : 'bg-[#1F2430]'
-                          } ${isBarLine ? 'border-l-2 border-l-[#4A5169]' : ''} ${
-                            isPlayhead ? 'ring-1 ring-inset ring-[#E8A33D]' : ''
-                          } hover:bg-[#333B52]`}
-                        />
-                      );
-                    });
-                  })}
-                </div>
-              ))}
+                ))}
+              </div>
+              <div className="flex gap-1 mb-2">
+                {bars.map((bar, i) => (
+                  <div
+                    key={`c${i}`}
+                    style={{ width: bar.beats * CHIP + (bar.beats - 1) * 4 }}
+                    className={`text-xs text-center text-[#A9AFC3] shrink-0 ${i > 0 ? 'border-l border-[#4A5169] pl-1' : ''}`}
+                  >
+                    {bar.chords.join(' – ')}
+                  </div>
+                ))}
+              </div>
+              <div className="flex gap-1">
+                {Array.from({ length: total }).map((_, col) => {
+                  const raw = melody[col] ?? null;
+                  const isNote = raw != null && raw >= 0;
+                  const isRest = raw === -1;
+                  const isHold = !isNote && !isRest;
+                  const held = isHold ? heldNoteName(col) : null;
+                  const tones = chordToneDegs(rootMidi, chordAtCol(progression, col));
+                  const isTone = isNote && tones.includes(raw);
+                  const isSel = selected === col;
+                  const isPlayhead = playheadCol === col;
+                  const isBarLine = col > 0 && col % beatsPerBar === 0;
+                  const empty = isRest || (isHold && !held);
+                  const label = isNote ? midiToNote(extendedDegreeMidi(rootMidi, raw)) : (held || '·');
+                  return (
+                    <button
+                      key={col}
+                      onClick={() => handleChip(col)}
+                      style={{ width: CHIP - 4 }}
+                      className={`h-14 shrink-0 rounded-md border text-[11px] font-mono transition-colors ${
+                        empty
+                          ? 'border-dashed border-[#333B52] bg-transparent text-[#5B6178]'
+                          : isNote
+                            ? (isTone
+                              ? 'border-[#4A5169] bg-[#2C3346] text-[#F2EFE9]'
+                              : 'border-[#333B52] bg-[#1F2430] text-[#A9AFC3]')
+                            : 'border-[#232838] bg-[#1B1F2A] text-[#6B7285]'
+                      } ${isSel ? 'ring-2 ring-[#E8A33D]' : ''} ${
+                        isPlayhead ? 'ring-1 ring-inset ring-[#E8A33D]' : ''
+                      } ${isBarLine ? 'border-l-2 border-l-[#6B7285]' : ''} hover:border-[#E8A33D]`}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
+
+          {selected != null && (
+            <div className="mt-4 border border-[#333B52] rounded-md px-4 py-3 bg-[#1F2430] flex flex-wrap items-center gap-2">
+              <span className="text-xs text-[#A9AFC3] mr-1">
+                第 {Math.floor(selected / beatsPerBar) + 1} 小節・第 {(selected % beatsPerBar) + 1} 拍：
+                <span className={selIsNote ? 'text-[#F2EFE9]' : 'text-[#6B7285]'}>{selLabel}</span>
+                <span className="text-[#5B6178] ml-1.5">{selIsNote ? '新音' : selIsRest ? '休止' : '延續'}</span>
+                {selIsTone && <span className="text-[#8FBF9F] ml-1.5">和弦音</span>}
+              </span>
+              {selIsNote ? (
+                <>
+                  <button onClick={() => nudge(-1)} className={toolBtn}>↓ 低一階</button>
+                  <button onClick={() => nudge(1)} className={toolBtn}>↑ 高一階</button>
+                  <button onClick={snapToTone} className={toolBtn}>靠攏和弦音</button>
+                  <button onClick={() => setMelodyNote(selected, -1)} className={toolBtn}>改成休止</button>
+                </>
+              ) : selIsRest ? (
+                <>
+                  <button onClick={putChordTone} className={toolBtn}>放一個和弦音</button>
+                  <button onClick={() => setMelodyNote(selected, null)} className={toolBtn}>接回前音</button>
+                </>
+              ) : (
+                <>
+                  <button onClick={putChordTone} className={toolBtn}>放一個和弦音</button>
+                  <button onClick={() => setMelodyNote(selected, -1)} className={toolBtn}>改成休止</button>
+                </>
+              )}
+              <button onClick={() => setSelected(null)} className={`${toolBtn} ml-auto`}>收合</button>
+            </div>
+          )}
 
           <div className="flex flex-wrap items-center gap-3 mt-6">
             <button
@@ -3543,15 +3921,25 @@ function DashRow({ label, value }) {
   );
 }
 
-// 旋律陣列轉成可讀的文字：C4 E4 · G4 ｜ …
-function melodyPreview(s) {
-  const m = Array.isArray(s.melody) ? s.melody : [];
-  if (!m.length || m.every((d) => d == null)) return '';
-  const per = tsDef(s.timeSig || '4/4').num;
-  const tokens = m.map((d) => (d == null ? '·' : midiToNote(extendedDegreeMidi(60, d))));
+// 旋律陣列轉成可讀文字：null = 延續上一個音（–）、-1 = 休止（·）
+function melodyTextOf(mel, rootMidi = 60, per = 4) {
+  const m = Array.isArray(mel) ? mel : [];
+  if (!m.some((d) => d != null && d >= 0)) return '';
+  const runAt = {};
+  melodyRuns(m).forEach((r) => { runAt[r.start] = r.deg; });
+  const tokens = [];
+  for (let col = 0; col < m.length; col += 1) {
+    if (runAt[col] != null) tokens.push(midiToNote(extendedDegreeMidi(rootMidi, runAt[col])));
+    else if (m[col] < 0) tokens.push('·');
+    else tokens.push('–');
+  }
   const bars = [];
   for (let i = 0; i < tokens.length; i += per) bars.push(tokens.slice(i, i + per).join(' '));
   return bars.join(' ｜ ');
+}
+
+function melodyPreview(s) {
+  return melodyTextOf(s.melody, 60, tsDef(s.timeSig || '4/4').num);
 }
 
 function TeacherDashboard({ onExit }) {
@@ -3748,7 +4136,6 @@ function TeacherDashboard({ onExit }) {
       ? ap.mood
       : (Array.isArray(ap.mood) ? ap.mood.join('、') : '');
     const apLayer = (id) => (ap.layers && typeof ap.layers[id] === 'string' ? ap.layers[id].trim() : '');
-    const melodyText = melodyPreview(s);
 
     if (tab === 'lyric-analysis') {
       const entries = s.lyricAnalysis?.entries || [];
@@ -3852,20 +4239,14 @@ function TeacherDashboard({ onExit }) {
       const c = s.song?.chorus?.progression || [];
       const vMel = s.song?.verse?.melody || s.melody || [];
       const cMel = s.song?.chorus?.melody || [];
-      const textOf = (prog, mel) => {
-        if (!mel.some((d) => d != null)) return '';
-        const per = tsDef(s.timeSig || '4/4').num;
-        const toks = mel.map((d) => (d == null ? '·' : midiToNote(extendedDegreeMidi(60, d))));
-        const bars = [];
-        for (let i = 0; i < toks.length; i += per) bars.push(toks.slice(i, i + per).join(' '));
-        return bars.join(' ｜ ');
-      };
+      const per = tsDef(s.timeSig || '4/4').num;
+      const textOf = (mel) => melodyTextOf(mel, 60, per);
       return (
         <div className="bg-[#1F2430] rounded p-2.5 space-y-2">
           <DashRow label="主歌和弦" value={v.map((d) => chordSymbol(d)).join(' → ')} />
-          <DashRow label="主歌旋律" value={textOf(v, vMel)} />
+          <DashRow label="主歌旋律" value={textOf(vMel)} />
           <DashRow label="副歌和弦" value={c.map((d) => chordSymbol(d)).join(' → ')} />
-          <DashRow label="副歌旋律" value={textOf(c, cMel)} />
+          <DashRow label="副歌旋律" value={textOf(cMel)} />
         </div>
       );
     }
